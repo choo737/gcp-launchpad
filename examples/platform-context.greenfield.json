@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "adoption_mode": "greenfield",
+  "compliance_profile": "regulated_fsi_rmit",
+  "selected_templates": [
+    "gcp-foundation",
+    "gcp-data-ingestion",
+    "gcp-data-medallion"
+  ],
+  "primary_region": "asia-southeast1",
+  "dr_region": "asia-southeast2",
+  "environments": [
+    "dev",
+    "staging",
+    "prod"
+  ],
+  "prefix": "acme",
+  "project_suffix": "dev01",
+  "github_owner": "example-org",
+  "ci_identity_mode": "github_oidc_wif",
+  "existing_landing_zone": {}
+}

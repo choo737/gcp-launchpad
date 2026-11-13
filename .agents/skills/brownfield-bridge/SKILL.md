@@ -1,0 +1,50 @@
+---
+name: brownfield-bridge
+description: Inspects existing GCP landing zone resources with read-only gcloud commands, updates platform-context.json, and generates brownfield tfvars and Dataform settings.
+---
+
+# Brownfield Bridge
+
+Use this workflow when skipping `gcp-foundation` and deploying onto an existing Google Cloud landing zone.
+
+## Step 1: Discover Existing GCP Resources (Read-Only)
+
+Run read-only `gcloud` and `bq` commands to inspect existing projects, networks, keys, buckets, and datasets:
+
+```bash
+gcloud compute networks list --project <network-project-id>
+gcloud compute networks subnets list --project <network-project-id> --regions <region>
+gcloud kms keys list --location <region> --keyring <keyring> --project <governance-project-id>
+bq ls --project_id <core-project-id>
+gcloud storage buckets list --project <core-project-id>
+```
+
+Never guess resource IDs, service account emails, or policy tag paths.
+
+## Step 2: Confirm and Update `platform-context.json`
+
+1. Confirm every discovered ID with the user before writing files.
+2. Populate `existing_landing_zone` inside gitignored `platform-context.json`.
+3. Include required fields: `core_project_id`, `compute_project_id`, `bronze_dataset_id`, `landing_bucket_name`, and `dataform_repository_name`.
+4. Add optional fields when present: `kms_key_id`, `vpc_id`, `subnet_id`, `dataform_sa_email`, and policy tag IDs.
+
+## Step 3: Generate `00_linked.auto.tfvars.json` for `gcp-data-ingestion`
+
+Run `scripts/generate-brownfield-link.py` targeting `gcp-data-ingestion/stages/enterprise`:
+
+```bash
+python3 scripts/generate-brownfield-link.py \
+  --context platform-context.json \
+  --target-variables-tf ../<customer-ingestion-repo>/stages/enterprise/variables.tf \
+  --output ../<customer-ingestion-repo>/stages/enterprise/00_linked.auto.tfvars.json
+```
+
+Verify the generated file has mode `0600` and contains only declared variables.
+
+## Step 4: Configure `gcp-data-medallion` Compilation Inputs
+
+Map the same confirmed IDs into `gcp-data-medallion`:
+
+1. Update `workflow_settings.yaml` defaults (`defaultProject`, `defaultLocation`, `defaultDataset`, `defaultAssertionDataset`).
+2. Copy `envs/<env>.compilation.json.example` to gitignored compilation overrides or Dataform release variables.
+3. Set `bronze_project`, `bronze_dataset`, `silver_project`, `silver_dataset`, `gold_project`, `gold_dataset`, and PII policy tags.

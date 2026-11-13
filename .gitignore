@@ -1,0 +1,11 @@
+platform-context.json
+*.tfvars
+*.tfvars.json
+.cm_project
+.codemender/
+__pycache__/
+.pytest_cache/
+.venv/
+.DS_Store
+*.tfstate
+*.tfstate.*

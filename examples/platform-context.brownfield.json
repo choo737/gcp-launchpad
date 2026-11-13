@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "adoption_mode": "brownfield",
+  "compliance_profile": "enterprise_standard",
+  "selected_templates": [
+    "gcp-data-ingestion",
+    "gcp-data-medallion"
+  ],
+  "primary_region": "asia-southeast1",
+  "dr_region": "",
+  "environments": [
+    "dev",
+    "staging",
+    "prod"
+  ],
+  "prefix": "acme",
+  "project_suffix": "dev01",
+  "github_owner": "example-org",
+  "ci_identity_mode": "github_oidc_wif",
+  "existing_landing_zone": {
+    "environment": "dev",
+    "region": "asia-southeast1",
+    "prefix": "acme",
+    "core_project_id": "acme-dev01-data-core",
+    "compute_project_id": "acme-dev01-data-etl",
+    "analytics_project_id": "acme-dev01-data-gold",
+    "bi_project_id": "acme-dev01-data-bi",
+    "governance_project_id": "acme-dev01-data-gov",
+    "bronze_dataset_id": "bronze",
+    "silver_dataset_id": "silver",
+    "gold_dataset_id": "gold",
+    "quarantine_dataset_id": "quarantine",
+    "assertions_dataset_id": "silver_assertions",
+    "ops_telemetry_dataset_id": "ops_telemetry",
+    "landing_bucket_name": "acme-dev01-raw-landing",
+    "dataform_repository_name": "medallion-repo",
+    "dataform_sa_email": "sa-dataform@acme-dev01-data-etl.iam.gserviceaccount.com",
+    "batch_loader_sa_email": "sa-batch-loader@acme-dev01-data-etl.iam.gserviceaccount.com",
+    "pubsub_writer_sa_email": "sa-pubsub-writer@acme-dev01-data-etl.iam.gserviceaccount.com",
+    "kms_key_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/keyRings/data-ring/cryptoKeys/data-cmek",
+    "pii_restricted_policy_tag_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/example-tax-id/policyTags/example-restricted-id",
+    "pii_masked_policy_tag_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/example-tax-id/policyTags/example-masked-id",
+    "vpc_id": "projects/acme-dev01-network/global/networks/acme-shared-vpc",
+    "subnet_id": "projects/acme-dev01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
+    "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-dev01-data-etl/ingestion-containers"
+  }
+}
