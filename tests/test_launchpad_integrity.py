@@ -34,7 +34,6 @@ REQUIRED_FILES = (
     "QUESTIONNAIRE.md",
     "AGENTS.md",
     "CLAUDE.md",
-    "GEMINI.md",
     "examples/platform-context.greenfield.json",
     "examples/platform-context.brownfield.json",
     "scripts/preflight-check.sh",
@@ -223,11 +222,12 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "gcp-webapp",
             "gcp-adk-agent",
         )
-        for doc_name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md"):
+        for doc_name in ("AGENTS.md", "CLAUDE.md"):
             content = (REPO_ROOT / doc_name).read_text(encoding="utf-8")
             with self.subTest(doc=doc_name):
                 for ref in required_refs:
                     self.assertIn(ref, content, f"{doc_name} missing {ref}")
+        self.assertFalse((REPO_ROOT / "GEMINI.md").exists(), "GEMINI.md must not exist")
 
         stale_roadmap_name = "gcp-webapp-" + "ha"
         for path in _iter_repo_files():

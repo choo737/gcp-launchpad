@@ -45,7 +45,7 @@ flowchart TD
 
 Always create private customer repositories with `--private` before saving customer identifiers or configuration files.
 
-### Antigravity or Gemini CLI
+### Antigravity
 
 ```text
 Read AGENTS.md, QUESTIONNAIRE.md, and .agents/skills/route-architecture/SKILL.md.
