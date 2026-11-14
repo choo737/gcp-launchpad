@@ -2,14 +2,16 @@
 
 `gcp-launchpad` is the entry router for the `choo737` Google Cloud template suite.
 
-## Template Catalog
+## Template Catalog & Documentation
 
 Read [README.md](README.md) as the single template catalog.
 
-Never create `catalog.yaml`.
+Never create `GEMINI.md` or `catalog.yaml`.
 
 - Active templates: `gcp-foundation`, `gcp-data-ingestion`, `gcp-data-medallion`.
 - Planned templates: `gcp-webapp`, `gcp-adk-agent`.
+- Operational playbook: [docs/01-end-to-end-operational-playbook.md](docs/01-end-to-end-operational-playbook.md).
+- Documentation standard: [docs/02-template-documentation-standard.md](docs/02-template-documentation-standard.md).
 
 ## Routing & Bridge Workflow
 
@@ -18,13 +20,14 @@ Never create `catalog.yaml`.
 3. Save answers to gitignored `platform-context.json` matching `examples/platform-context.greenfield.json` or `examples/platform-context.brownfield.json`.
 4. Always create private customer repositories using `gh repo create <owner>/<repo> --private --template choo737/<template> --clone`.
 5. For Brownfield setups, run `scripts/generate-brownfield-link.py` to produce `00_linked.auto.tfvars.json` (`0600`).
+6. Follow [docs/01-end-to-end-operational-playbook.md](docs/01-end-to-end-operational-playbook.md) for cross-repository Day-0, Day-1, and Day-2 handoffs.
 
 ## Security & Prose Rules
 
 - Never commit `platform-context.json`, `*.tfvars`, `*.tfvars.json`, or `*.tfstate*`.
 - Never commit real GCP project IDs, 12-digit org or folder IDs, billing IDs, or personal LDAPs.
 - Use `<YOUR_ORG_ID>`, `<YOUR_FOLDER_ID>`, `<YOUR_BILLING_ACCOUNT_ID>`, and `example-org` in docs and examples.
-- Keep every Markdown sentence within `20` words without decorative emojis, section symbols, or AI filler words.
+- Follow [docs/02-template-documentation-standard.md](docs/02-template-documentation-standard.md) for README structure, `<= 20`-word sentences, and CI hardening.
 
 ## Available Skills
 

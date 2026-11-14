@@ -34,6 +34,8 @@ REQUIRED_FILES = (
     "QUESTIONNAIRE.md",
     "AGENTS.md",
     "CLAUDE.md",
+    "docs/01-end-to-end-operational-playbook.md",
+    "docs/02-template-documentation-standard.md",
     "examples/platform-context.greenfield.json",
     "examples/platform-context.brownfield.json",
     "scripts/preflight-check.sh",
@@ -43,6 +45,19 @@ REQUIRED_FILES = (
     ".github/workflows/ci.yml",
     "tests/test_launchpad_integrity.py",
 )
+
+CANONICAL_README_H2_SECTIONS = [
+    "## Template Suite Overview",
+    "## Create Your Private Repository (Do Not Fork Publicly)",
+    "## Architecture & Capabilities",
+    "## 6-Step Enterprise Operationalization",
+    "## AI Coding Agent Quickstart",
+    "## CI/CD Workflows",
+    "## Repository Layout",
+    "## Quick Verification",
+    "## Documentation Index",
+    "## License",
+]
 
 LEAKED_IDENTIFIERS = (
     "jacky" + "choo",
@@ -206,10 +221,31 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             with self.subTest(entry=entry):
                 self.assertIn(entry, gitignore)
 
+    def test_readme_canonical_ten_sections(self) -> None:
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertTrue(
+            readme.startswith("# GCP Launchpad\n"),
+            "README.md must start with '# GCP Launchpad'",
+        )
+        h2_sections = [
+            line.strip() for line in readme.splitlines() if line.startswith("## ")
+        ]
+        self.assertEqual(h2_sections, CANONICAL_README_H2_SECTIONS)
+        for required_link in (
+            "QUESTIONNAIRE.md",
+            "docs/01-end-to-end-operational-playbook.md",
+            "docs/02-template-documentation-standard.md",
+            "LICENSE",
+        ):
+            with self.subTest(link=required_link):
+                self.assertIn(required_link, readme)
+
     def test_agent_instructions_align_and_roadmap_naming(self) -> None:
         required_refs = (
             "README.md",
             "QUESTIONNAIRE.md",
+            "docs/01-end-to-end-operational-playbook.md",
+            "docs/02-template-documentation-standard.md",
             "platform-context.json",
             "scripts/preflight-check.sh",
             "scripts/generate-brownfield-link.py",
