@@ -38,8 +38,8 @@
     "batch_loader_sa_email": "sa-batch-loader@acme-dev01-data-etl.iam.gserviceaccount.com",
     "pubsub_writer_sa_email": "sa-pubsub-writer@acme-dev01-data-etl.iam.gserviceaccount.com",
     "kms_key_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/keyRings/data-ring/cryptoKeys/data-cmek",
-    "pii_restricted_policy_tag_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/example-tax-id/policyTags/example-restricted-id",
-    "pii_masked_policy_tag_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/example-tax-id/policyTags/example-masked-id",
+    "pii_restricted_policy_tag_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/1000000001/policyTags/2000000001",
+    "pii_masked_policy_tag_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/1000000001/policyTags/2000000002",
     "vpc_id": "projects/acme-dev01-network/global/networks/acme-shared-vpc",
     "subnet_id": "projects/acme-dev01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
     "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-dev01-data-etl/ingestion-containers"

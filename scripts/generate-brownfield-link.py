@@ -15,22 +15,27 @@ PROJECT_ID_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
 DATASET_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,1024}$")
 BUCKET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$")
 ENVIRONMENT_RE = re.compile(r"^(dev|staging|prod)$")
-PREFIX_RE = re.compile(r"^[a-z][a-z0-9-]{1,7}$")
+PREFIX_RE = re.compile(r"^[a-z](?:[a-z0-9-]{0,6}[a-z0-9])$")
 REGION_RE = re.compile(r"^[a-z]+-[a-z]+[0-9]+$")
 DATAFORM_SHORT_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 DATAFORM_PATH_RE = re.compile(
-    r"^projects/[^/\s]+/locations/[^/\s]+/repositories/[^/\s]+$"
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/repositories/[A-Za-z0-9._-]+$"
 )
 SA_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 KMS_KEY_RE = re.compile(
-    r"^projects/[^/\s]+/locations/[^/\s]+/keyRings/[^/\s]+/cryptoKeys/[^/\s]+$"
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/keyRings/[A-Za-z0-9._-]+/cryptoKeys/[A-Za-z0-9._-]+$"
 )
-VPC_ID_RE = re.compile(r"^projects/[^/\s]+/global/networks/[^/\s]+$")
+VPC_ID_RE = re.compile(
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/global/networks/[A-Za-z0-9._-]+$"
+)
 SUBNET_ID_RE = re.compile(
-    r"^projects/[^/\s]+/regions/[^/\s]+/subnetworks/[^/\s]+$"
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/regions/[a-z0-9-]+/subnetworks/[A-Za-z0-9._-]+$"
+)
+NETWORK_ATTACHMENT_RE = re.compile(
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/regions/[a-z0-9-]+/networkAttachments/[A-Za-z0-9._-]+$"
 )
 POLICY_TAG_RE = re.compile(
-    r"^projects/[^/\s]+/locations/[^/\s]+/taxonomies/[^/\s]+/policyTags/[^/\s]+$"
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/taxonomies/[0-9]+/policyTags/[0-9]+$"
 )
 ARTIFACT_REGISTRY_URI_RE = re.compile(
     r"^[a-z0-9-]+-docker\.pkg\.dev/[a-z][a-z0-9-]{4,28}[a-z0-9]/[a-z0-9][a-z0-9._-]{0,62}$"
@@ -59,14 +64,18 @@ FIELD_FLAGS = (
     "landing_bucket_name",
     "ops_telemetry_dataset_id",
     "dataform_repository_name",
+    "dataform_release_config_name",
     "dataform_sa_email",
     "batch_loader_sa_email",
     "pubsub_writer_sa_email",
+    "dataplex_profile_scan_id",
+    "dataplex_quality_scan_id",
     "kms_key_id",
     "pii_restricted_policy_tag_id",
     "pii_masked_policy_tag_id",
     "vpc_id",
     "subnet_id",
+    "datastream_network_attachment_id",
     "artifact_registry_repository_uri",
     "region",
     "environment",
@@ -77,6 +86,7 @@ ALIAS_PAIRS = (
     ("core_project_id", "core_storage_project_id"),
     ("compute_project_id", "etl_compute_project_id"),
     ("analytics_project_id", "primary_gold_project_id"),
+    ("bi_project_id", "bi_compute_project_id"),
     ("gold_dataset_id", "primary_gold_dataset_id"),
     ("kms_key_id", "kms_key_name"),
     ("vpc_id", "network_id"),
@@ -142,7 +152,15 @@ def load_context_values(context_path: Path) -> dict[str, str]:
         if not isinstance(landing_zone, dict):
             raise ValueError("existing_landing_zone must be a JSON object.")
         for key, raw_val in landing_zone.items():
-            if key in FIELD_FLAGS and isinstance(raw_val, str) and raw_val.strip():
+            if key not in FIELD_FLAGS:
+                continue
+            if raw_val is None:
+                continue
+            if not isinstance(raw_val, str):
+                raise ValueError(
+                    f"existing_landing_zone.{key} must be a string, got {type(raw_val).__name__}"
+                )
+            if raw_val.strip():
                 values[key] = raw_val.strip()
 
     top_level_mappings = (
@@ -207,6 +225,19 @@ def validate_inputs(values: dict[str, str]) -> None:
         _validate_pattern("vpc_id", values["vpc_id"], VPC_ID_RE)
     if values.get("subnet_id"):
         _validate_pattern("subnet_id", values["subnet_id"], SUBNET_ID_RE)
+    if values.get("datastream_network_attachment_id"):
+        _validate_pattern(
+            "datastream_network_attachment_id",
+            values["datastream_network_attachment_id"],
+            NETWORK_ATTACHMENT_RE,
+        )
+    for short_field in (
+        "dataform_release_config_name",
+        "dataplex_profile_scan_id",
+        "dataplex_quality_scan_id",
+    ):
+        if values.get(short_field):
+            _validate_pattern(short_field, values[short_field], DATAFORM_SHORT_RE)
     if values.get("pii_restricted_policy_tag_id"):
         _validate_pattern(
             "pii_restricted_policy_tag_id",
@@ -296,8 +327,8 @@ def main(argv: list[str] | None = None) -> int:
         validate_inputs(values)
         linked = build_linked_tfvars(values, args.target_variables_tf)
         write_atomic_json(args.output, linked)
-    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
     print(f"Wrote {len(linked)} linked variable(s) to {args.output}")

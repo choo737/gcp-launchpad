@@ -58,7 +58,14 @@ Provision the Greenfield landing zone in `gcp-foundation`, or run the Brownfield
 2. Deploy `foundation/02-security-network` per environment (`dev`, `staging`, `prod`) for Shared VPC, KMS keys, and VPC-SC.
 3. Keep `enforce_vpc_sc = false` initially so VPC-SC runs in `DRY_RUN` mode while validating traffic.
 4. Deploy `data/enterprise/01-platform` and `data/enterprise/02-governance-ops` per environment (`dev`, `staging`, `prod`).
-5. Export non-sensitive stage outputs per environment using `./scripts/link-stages.sh --env <env> --export-gcs`.
+5. Export non-sensitive stage outputs per environment to Cloud Storage with `scripts/link-stages.sh`.
+
+```bash
+./scripts/link-stages.sh --env <env> \
+  --export-gcs gs://<iac-outputs-bucket>/foundation-outputs.json \
+  foundation/02-security-network data/enterprise/01-platform data/enterprise/02-governance-ops
+```
+
 6. Inspect `DRY_RUN` VPC-SC logs in Log Analytics, update ingress rules, then flip `enforce_vpc_sc = true` (`DRY_RUN -> ENFORCED`).
 
 ### Option B: Brownfield Bridge (`gcp-launchpad`)
@@ -72,7 +79,14 @@ Provision the Greenfield landing zone in `gcp-foundation`, or run the Brownfield
 
 Deploy streaming, CDC, and batch Bronze pipelines using linked landing zone outputs and immutable container digests.
 
-1. Run `./scripts/link-stages.sh --env <env> --from-gcs` (Greenfield) or `scripts/generate-brownfield-link.py` (Brownfield) for `stages/enterprise`.
+1. Link upstream stage outputs into `stages/enterprise` using `link-stages.sh` (Greenfield) or `generate-brownfield-link.py` (Brownfield).
+
+```bash
+./scripts/link-stages.sh --env <env> \
+  --from-gcs gs://<iac-outputs-bucket>/foundation-outputs.json \
+  stages/enterprise
+```
+
 2. Trigger `.github/workflows/build-batch-loader.yml` to build `jobs/gcs_to_bronze` and record its immutable `@sha256` digest.
 3. Paste that `@sha256` digest into `batch_container_image` inside `stages/enterprise/envs/staging.tfvars` and `prod.tfvars`.
 4. Store every source database replication password in regional Secret Manager (`gcloud secrets create`) and pass version paths only.
@@ -84,7 +98,7 @@ Deploy streaming, CDC, and batch Bronze pipelines using linked landing zone outp
 Configure Dataform `3.1.5` SQLX transformations, dual-tier PII policy tags, and tag-gated production promotion.
 
 1. Set default targets in `workflow_settings.yaml` and copy `envs/*.compilation.json.example` to gitignored `envs/<env>.compilation.json`.
-2. Configure GitHub repository variables (`DATAFORM_REPO_PATH`, `BRONZE_PROJECT`, `SILVER_PROJECT`, `GOLD_PROJECT`, and PII policy tags).
+2. Configure GitHub variables (`GCP_WIF_PROVIDER`, `GCP_WIF_SERVICE_ACCOUNT`, `DATAFORM_REPO_PATH`, `BRONZE_PROJECT`, `SILVER_PROJECT`, `GOLD_PROJECT`, and PII tags).
 3. Open pull requests against `main` to run `.github/workflows/dataform-dryrun.yml` with strict PII enforcement (`allow_untagged_pii = "false"`).
 4. Merge to `main` to update `dev-main` and `staging-main` Dataform release configs via `.github/workflows/dataform-promote.yml`.
 5. Cut an annotated Git tag (`git tag -a v1.0.0 -m "Release v1.0.0"`) and push it to promote `prod-main`.
@@ -103,8 +117,8 @@ Add new business feeds across Ingestion, Medallion, and Foundation using this ex
 
 Operate live pipelines with telemetry queries, quarantine replay, drift-safe Terraform applies, and planned domain splits.
 
-- **Telemetry & alerts**: Query `ops_telemetry.pipeline_runs` (`execution_id`, `status`, `recorded_at`), and triage SCC alerts and Cloud Monitoring failures.
+- **Telemetry & alerts**: Query `<prefix>_ops_telemetry.pipeline_runs` (`execution_id`, `status`, `recorded_at`), and triage SCC and Cloud Monitoring alerts.
 - **DLQ & quarantine replay**: Inspect `<target_table_id>_quarantine` tables or GCS `quarantine/*.error.json` sidecars, fix payloads, and replay into `source_prefix`.
 - **VPC-SC dry-run checks**: Test new principals and services in `DRY_RUN` mode in Log Analytics before updating `prod` enforced perimeters.
-- **Drift-safe Terraform changes**: Run `make plan` before `make apply`, and import out-of-band resources instead of recreating stateful buckets or datasets.
-- **Scale triggers**: Split `gcp-data-ingestion` by business domain at 15–30 pipelines (`split-domain-ingestion`), and split Gold marts (`split-domain-mesh`) when domain teams diverge.
+- **Drift-safe Terraform changes**: Run `make plan STAGE=<stage> ENV=<env> TFSTATE_BUCKET=<bucket>` before `make apply`, and import existing resources.
+- **Scale triggers**: Split `gcp-data-ingestion` by domain (`split-domain-ingestion`), and split Gold marts (`split-domain-mesh`) when teams diverge.

@@ -6,6 +6,14 @@ It routes teams from business requirements to private, production-ready Google C
 
 ## Template Suite Overview
 
+<picture>
+  <source type="image/webp" srcset="assets/cloud-city-launchpad.webp">
+  <img src="assets/cloud-city-launchpad.gif" alt="Cloud City four-layer Google Cloud platform architecture" width="100%">
+</picture>
+
+Cloud City models four layers: 01 Bedrock/Wiring/Grid, 02 Transit/Cargo Intake, 03 Refinery/Piping, and 04 Skyline/AI.
+Each downstream repository builds and highlights its own active layer inside the suite.
+
 | Template Repository | Status | Included Capabilities | Best For |
 | --- | --- | --- | --- |
 | **gcp-launchpad** *(this repo — Suite Overview, Architecture Router & Brownfield Bridge)* | Active | Architecture intake questionnaire, preflight checks, Brownfield bridge generator, and cross-repo operational playbook | Multi-repo Greenfield or Brownfield planning and team handoffs |
@@ -97,6 +105,7 @@ Every push to `main` and every pull request runs `.github/workflows/ci.yml` on `
 
 ## Repository Layout
 
+- `assets/`: Cloud City visual architecture animations and org completeness scanner diagram.
 - `QUESTIONNAIRE.md`: Six-section Tier-1 intake questionnaire producing gitignored `platform-context.json`.
 - `docs/`: End-to-end operational playbook and template documentation standard.
 - `examples/`: Reference `platform-context.greenfield.json` and `platform-context.brownfield.json` contracts.
@@ -117,6 +126,7 @@ make test
 - [Tier-1 Architecture Router Questionnaire](QUESTIONNAIRE.md)
 - [End-to-End Operational Playbook](docs/01-end-to-end-operational-playbook.md)
 - [Template Documentation Standard](docs/02-template-documentation-standard.md)
+- [Org Completeness Scanner Design](docs/03-org-completeness-scanner-design.md)
 - [gcp-foundation Enterprise Operationalization Guide](https://github.com/choo737/gcp-foundation/blob/main/docs/05-enterprise-operationalization-guide.md)
 - [gcp-data-ingestion Enterprise Adoption Guide](https://github.com/choo737/gcp-data-ingestion/blob/main/docs/03-enterprise-adoption-guide.md)
 - [gcp-data-medallion Enterprise Operationalization Guide](https://github.com/choo737/gcp-data-medallion/blob/main/docs/02-enterprise-operationalization-guide.md)

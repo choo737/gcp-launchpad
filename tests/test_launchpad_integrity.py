@@ -25,6 +25,14 @@ SKIP_FILES = frozenset({
     "00_linked.auto.tfvars.json",
 })
 
+BINARY_EXTENSIONS = frozenset({
+    ".webp",
+    ".gif",
+    ".png",
+    ".jpg",
+    ".jpeg",
+})
+
 REQUIRED_FILES = (
     "LICENSE",
     "CODEOWNERS",
@@ -34,8 +42,12 @@ REQUIRED_FILES = (
     "QUESTIONNAIRE.md",
     "AGENTS.md",
     "CLAUDE.md",
+    "assets/cloud-city-launchpad.webp",
+    "assets/cloud-city-launchpad.gif",
+    "assets/cloud-city-org-scanner.png",
     "docs/01-end-to-end-operational-playbook.md",
     "docs/02-template-documentation-standard.md",
+    "docs/03-org-completeness-scanner-design.md",
     "examples/platform-context.greenfield.json",
     "examples/platform-context.brownfield.json",
     "scripts/preflight-check.sh",
@@ -152,6 +164,8 @@ def _iter_repo_files() -> list[Path]:
             continue
         if path.name.endswith((".tfstate", ".tfstate.backup")) or ".tfstate." in path.name:
             continue
+        if path.suffix.lower() in BINARY_EXTENSIONS:
+            continue
         files.append(path)
     return files
 
@@ -183,7 +197,7 @@ def _extract_markdown_sentences(text: str) -> list[str]:
             continue
         if in_code:
             continue
-        if not stripped or stripped.startswith(("#", "|", "---")):
+        if not stripped or stripped.startswith(("#", "|", "---", "<picture", "</picture", "<source", "<img", "![")):
             flush_para()
             continue
         if BULLET_PREFIX_RE.match(stripped):
@@ -235,6 +249,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "QUESTIONNAIRE.md",
             "docs/01-end-to-end-operational-playbook.md",
             "docs/02-template-documentation-standard.md",
+            "docs/03-org-completeness-scanner-design.md",
             "LICENSE",
         ):
             with self.subTest(link=required_link):
@@ -354,6 +369,49 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 )
                 self.assertNotEqual(bad_res.returncode, 0)
 
+        for empty_or_missing in (
+            ["--dry-run", "--project", ""],
+            ["--dry-run", "--org-id", ""],
+            ["--dry-run", "--region", ""],
+            ["--dry-run", "--project"],
+            ["--project", "--dry-run"],
+            ["--dry-run", "--project="],
+            ["--dry-run", "--org-id="],
+            ["--dry-run", "--region="],
+        ):
+            with self.subTest(empty_or_missing=empty_or_missing):
+                usage_res = subprocess.run(
+                    ["bash", str(script), *empty_or_missing],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(usage_res.returncode, 2, usage_res.stderr)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            bin_dir = Path(tmp_dir) / "bin"
+            bin_dir.mkdir()
+            for tool_name, body in (
+                ("gcloud", "#!/usr/bin/env bash\necho '(unset)'\n"),
+                ("gh", "#!/usr/bin/env bash\nexit 0\n"),
+                ("terraform", "#!/usr/bin/env bash\nexit 0\n"),
+            ):
+                tool_path = bin_dir / tool_name
+                tool_path.write_text(body, encoding="utf-8")
+                tool_path.chmod(0o755)
+
+            env = os.environ.copy()
+            env["PATH"] = f"{bin_dir}:{env['PATH']}"
+            unset_res = subprocess.run(
+                ["bash", str(script)],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(unset_res.returncode, 1)
+            self.assertIn("No active gcloud account", unset_res.stderr)
+
     def test_generate_brownfield_link_end_to_end_and_filtering(self) -> None:
         script = REPO_ROOT / "scripts" / "generate-brownfield-link.py"
         self.assertTrue(
@@ -388,6 +446,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             self.assertEqual(linked["core_storage_project_id"], "acme-dev01-data-core")
             self.assertEqual(linked["etl_compute_project_id"], "acme-dev01-data-etl")
             self.assertEqual(linked["primary_gold_project_id"], "acme-dev01-data-gold")
+            self.assertEqual(linked["bi_compute_project_id"], "acme-dev01-data-bi")
             self.assertEqual(linked["primary_gold_dataset_id"], "gold")
             self.assertEqual(linked["kms_key_name"], linked["kms_key_id"])
             self.assertEqual(linked["network_id"], linked["vpc_id"])
@@ -396,42 +455,72 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 linked["dataform_sa_email"],
             )
 
-            # Verify --target-variables-tf filtering strictly trims undeclared keys.
+            # Verify optional Dataform, Dataplex, and Datastream fields pass validation and filter cleanly.
+            ext_out = tmp_root / "extended.auto.tfvars.json"
             target_vars = tmp_root / "variables.tf"
             target_vars.write_text(
                 'variable "core_storage_project_id" { type = string }\n'
                 'variable "bronze_dataset_id" { type = string }\n'
-                'variable "landing_bucket_name" { type = string }\n',
+                'variable "landing_bucket_name" { type = string }\n'
+                'variable "dataform_release_config_name" { type = string }\n'
+                'variable "dataplex_profile_scan_id" { type = string }\n'
+                'variable "dataplex_quality_scan_id" { type = string }\n'
+                'variable "datastream_network_attachment_id" { type = string }\n',
                 encoding="utf-8",
             )
-            filtered_out = tmp_root / "filtered.auto.tfvars.json"
-            filt_res = subprocess.run(
+            ext_res = subprocess.run(
                 [
                     sys.executable,
                     str(script),
                     "--context",
                     str(brownfield_ctx),
+                    "--dataform-release-config-name",
+                    "prod-release",
+                    "--dataplex-profile-scan-id",
+                    "silver-orders-profile",
+                    "--dataplex-quality-scan-id",
+                    "silver-orders-dq",
+                    "--datastream-network-attachment-id",
+                    "projects/acme-dev01-network/regions/asia-southeast1/networkAttachments/ds-psc",
                     "--target-variables-tf",
                     str(target_vars),
                     "--output",
-                    str(filtered_out),
+                    str(ext_out),
                 ],
                 capture_output=True,
                 text=True,
                 check=False,
             )
-            self.assertEqual(filt_res.returncode, 0, filt_res.stderr)
-            filtered = json.loads(filtered_out.read_text(encoding="utf-8"))
+            self.assertEqual(ext_res.returncode, 0, ext_res.stderr)
+            filtered = json.loads(ext_out.read_text(encoding="utf-8"))
             self.assertEqual(
                 set(filtered.keys()),
-                {"bronze_dataset_id", "core_storage_project_id", "landing_bucket_name"},
+                {
+                    "bronze_dataset_id",
+                    "core_storage_project_id",
+                    "dataform_release_config_name",
+                    "dataplex_profile_scan_id",
+                    "dataplex_quality_scan_id",
+                    "datastream_network_attachment_id",
+                    "landing_bucket_name",
+                },
             )
 
-            # Verify invalid identifiers and missing required fields fail non-zero.
+            # Verify invalid identifiers, non-numeric policy tags, metacharacters, and missing fields fail cleanly.
             for bad_args in (
                 ["--core-project-id", "BAD_PROJECT"],
                 ["--kms-key-id", "not/a/kms/key"],
+                ["--kms-key-id", 'projects/acme-dev01-gov/locations/asia-southeast1/keyRings/ring"/cryptoKeys/key'],
                 ["--vpc-id", "invalid-vpc"],
+                ["--vpc-id", "projects/acme-dev01-net/global/networks/vpc;rm"],
+                ["--subnet-id", "projects/acme-dev01-net/regions/asia-southeast1/subnetworks/sub$x"],
+                ["--dataform-repository-name", "projects/acme-dev01-etl/locations/asia-southeast1/repositories/repo'x"],
+                ["--pii-restricted-policy-tag-id", "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/example-tax-id/policyTags/12345678"],
+                ["--pii-masked-policy-tag-id", "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/1000000001/policyTags/non-numeric"],
+                ["--datastream-network-attachment-id", "projects/bad/global/networkAttachments/ds"],
+                ["--prefix", "a-"],
+                ["--prefix", "a"],
+                ["--prefix", "toolongprefix"],
                 ["--context", str(REPO_ROOT / "examples" / "platform-context.greenfield.json")],
             ):
                 with self.subTest(bad_args=bad_args):
@@ -443,33 +532,78 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                     )
                     self.assertNotEqual(err_res.returncode, 0)
 
-    def test_ci_workflow_security_hardening(self) -> None:
-        ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            # Verify non-string values in existing_landing_zone are rejected.
+            bad_ctx = tmp_root / "bad-type-context.json"
+            ctx_payload = json.loads(brownfield_ctx.read_text(encoding="utf-8"))
+            ctx_payload["existing_landing_zone"]["bronze_dataset_id"] = 12345
+            bad_ctx.write_text(json.dumps(ctx_payload), encoding="utf-8")
+            type_res = subprocess.run(
+                [sys.executable, str(script), "--context", str(bad_ctx), "--output", str(out_file)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(type_res.returncode, 0)
+            self.assertIn("ERROR:", type_res.stderr)
+
+            # Verify OSError (IsADirectoryError) exits cleanly without a Python traceback.
+            dir_out = tmp_root / "existing_dir"
+            dir_out.mkdir()
+            os_res = subprocess.run(
+                [sys.executable, str(script), "--context", str(brownfield_ctx), "--output", str(dir_out)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(os_res.returncode, 0)
+            self.assertIn("ERROR:", os_res.stderr)
+            self.assertNotIn("Traceback", os_res.stderr)
+
+    def test_playbook_contains_complete_commands_and_variables(self) -> None:
+        playbook = (REPO_ROOT / "docs" / "01-end-to-end-operational-playbook.md").read_text(
             encoding="utf-8"
         )
-        self.assertRegex(ci_text, r"(?m)^permissions:\s*\n\s*contents:\s*read\s*$")
-        uses_refs = re.findall(r"(?m)^\s*uses:\s*([^\s#]+)", ci_text)
-        self.assertGreaterEqual(len(uses_refs), 2)
-        for ref in uses_refs:
-            with self.subTest(action_ref=ref):
-                self.assertRegex(ref, r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$")
+        for expected in (
+            "foundation/02-security-network data/enterprise/01-platform data/enterprise/02-governance-ops",
+            "--from-gcs gs://<iac-outputs-bucket>/foundation-outputs.json",
+            "stages/enterprise",
+            "GCP_WIF_PROVIDER",
+            "GCP_WIF_SERVICE_ACCOUNT",
+            "<prefix>_ops_telemetry.pipeline_runs",
+            "make plan STAGE=<stage> ENV=<env> TFSTATE_BUCKET=<bucket>",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, playbook)
 
-        in_run_block = False
-        run_indent = 0
-        for line in ci_text.splitlines():
-            stripped = line.lstrip()
-            indent = len(line) - len(stripped)
-            if re.match(r"^(?:-\s*)?run:\s*", stripped):
-                self.assertNotIn("${{", stripped, "Expression interpolation inside run:")
-                if stripped.endswith("|") or stripped.endswith(">"):
-                    in_run_block = True
-                    run_indent = indent
-                continue
-            if in_run_block:
-                if stripped and indent <= run_indent:
-                    in_run_block = False
-                else:
-                    self.assertNotIn("${{", line, "Expression interpolation inside run: block")
+    def test_ci_workflow_security_hardening(self) -> None:
+        workflow_files = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+        self.assertGreaterEqual(len(workflow_files), 1)
+        for wf_path in workflow_files:
+            ci_text = wf_path.read_text(encoding="utf-8")
+            with self.subTest(workflow=wf_path.name):
+                self.assertRegex(ci_text, r"(?m)^permissions:\s*\n\s*contents:\s*read\s*$")
+                uses_refs = re.findall(r"(?m)^\s*uses:\s*([^\s#]+)", ci_text)
+                self.assertGreaterEqual(len(uses_refs), 2)
+                for ref in uses_refs:
+                    with self.subTest(action_ref=ref):
+                        self.assertRegex(ref, r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$")
+
+                in_run_block = False
+                run_indent = 0
+                for line in ci_text.splitlines():
+                    stripped = line.lstrip()
+                    indent = len(line) - len(stripped)
+                    if re.match(r"^(?:-\s*)?run:\s*", stripped):
+                        self.assertNotIn("${{", stripped, f"{wf_path.name}: Expression interpolation inside run:")
+                        if stripped.rstrip().endswith(("|", ">", "|-", ">-")):
+                            in_run_block = True
+                            run_indent = indent
+                        continue
+                    if in_run_block:
+                        if stripped and indent <= run_indent:
+                            in_run_block = False
+                        else:
+                            self.assertNotIn("${{", line, f"{wf_path.name}: Expression interpolation inside run: block")
 
     def test_no_leaked_identifiers_secrets_or_deprecated_models(self) -> None:
         for path in _iter_repo_files():
@@ -545,6 +679,26 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                         20,
                         f"Sentence exceeds 20 words ({len(words)}) in {rel}: {sentence}",
                     )
+
+    def test_visual_assets_have_valid_headers(self) -> None:
+        webp_path = REPO_ROOT / "assets" / "cloud-city-launchpad.webp"
+        gif_path = REPO_ROOT / "assets" / "cloud-city-launchpad.gif"
+        png_path = REPO_ROOT / "assets" / "cloud-city-org-scanner.png"
+
+        for asset_path in (webp_path, gif_path, png_path):
+            with self.subTest(asset=str(asset_path.relative_to(REPO_ROOT))):
+                self.assertTrue(asset_path.is_file(), f"Missing {asset_path}")
+                self.assertGreater(asset_path.stat().st_size, 100_000)
+
+        webp_head = webp_path.read_bytes()[:12]
+        self.assertEqual(webp_head[:4], b"RIFF")
+        self.assertEqual(webp_head[8:12], b"WEBP")
+
+        gif_head = gif_path.read_bytes()[:6]
+        self.assertEqual(gif_head, b"GIF89a")
+
+        png_head = png_path.read_bytes()[:8]
+        self.assertEqual(png_head, b"\x89PNG\r\n\x1a\n")
 
 
 if __name__ == "__main__":

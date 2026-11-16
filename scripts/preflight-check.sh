@@ -3,18 +3,21 @@ set -euo pipefail
 
 PROJECT_RE='^[a-z][a-z0-9-]{4,28}[a-z0-9]$'
 NUMERIC_ID_RE='^[0-9]{8,25}$'
+REGION_RE='^[a-z]+-[a-z]+[0-9]+$'
 
 usage() {
   cat <<'EOF'
 Usage:
-  preflight-check.sh [--dry-run] [--project <id>] [--folder <id>] [--org <id>] [-h|--help]
+  preflight-check.sh [--dry-run] [--project <id>] [--folder <id>] [--org <id>] [--region <region>] [-h|--help]
 
 Options:
-  --project <id>   Validate and inspect a GCP project ID.
-  --folder <id>    Validate and inspect a numeric GCP folder ID.
-  --org <id>       Validate and inspect a numeric GCP organization ID.
-  --dry-run        Validate flags and print planned read-only checks without network calls.
-  -h, --help       Show this help message and exit.
+  --project <id>     Validate and inspect a GCP project ID.
+  --folder <id>      Validate and inspect a numeric GCP folder ID.
+  --org <id>         Validate and inspect a numeric GCP organization ID.
+  --org-id <id>      Alias for --org.
+  --region <region>  Validate a GCP region name (for example asia-southeast1).
+  --dry-run          Validate flags and print planned read-only checks without network calls.
+  -h, --help         Show this help message and exit.
 EOF
 }
 
@@ -23,11 +26,25 @@ die() {
   exit 1
 }
 
+die_usage() {
+  printf 'Error: %s\n' "$1" >&2
+  exit 2
+}
+
 require_arg_value() {
   local flag="$1"
   local remaining="$2"
-  if [ "$remaining" -lt 2 ]; then
-    die "Missing value for ${flag}"
+  local value="${3:-}"
+  if [ "$remaining" -lt 2 ] || [ -z "$value" ] || [[ "$value" == --* ]]; then
+    die_usage "Missing or empty value for ${flag}"
+  fi
+}
+
+require_inline_value() {
+  local flag="$1"
+  local value="$2"
+  if [ -z "$value" ] || [[ "$value" == --* ]]; then
+    die_usage "Missing or empty value for ${flag}"
   fi
 }
 
@@ -35,6 +52,7 @@ dry_run=false
 project_id=""
 folder_id=""
 org_id=""
+region=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -43,30 +61,43 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --project)
-      require_arg_value "$1" "$#"
+      require_arg_value "$1" "$#" "${2:-}"
       project_id="$2"
       shift 2
       ;;
     --project=*)
       project_id="${1#--project=}"
+      require_inline_value "--project" "$project_id"
       shift
       ;;
     --folder)
-      require_arg_value "$1" "$#"
+      require_arg_value "$1" "$#" "${2:-}"
       folder_id="$2"
       shift 2
       ;;
     --folder=*)
       folder_id="${1#--folder=}"
+      require_inline_value "--folder" "$folder_id"
       shift
       ;;
-    --org)
-      require_arg_value "$1" "$#"
+    --org|--org-id)
+      require_arg_value "$1" "$#" "${2:-}"
       org_id="$2"
       shift 2
       ;;
-    --org=*)
-      org_id="${1#--org=}"
+    --org=*|--org-id=*)
+      org_id="${1#*=}"
+      require_inline_value "${1%%=*}" "$org_id"
+      shift
+      ;;
+    --region)
+      require_arg_value "$1" "$#" "${2:-}"
+      region="$2"
+      shift 2
+      ;;
+    --region=*)
+      region="${1#--region=}"
+      require_inline_value "--region" "$region"
       shift
       ;;
     -h|--help)
@@ -74,7 +105,7 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     *)
-      die "Unknown argument: $1"
+      die_usage "Unknown argument: $1"
       ;;
   esac
 done
@@ -89,6 +120,10 @@ fi
 
 if [ -n "$org_id" ] && [[ ! "$org_id" =~ $NUMERIC_ID_RE ]]; then
   die "Invalid --org ID '${org_id}'. Must match ${NUMERIC_ID_RE}"
+fi
+
+if [ -n "$region" ] && [[ ! "$region" =~ $REGION_RE ]]; then
+  die "Invalid --region '${region}'. Must match ${REGION_RE}"
 fi
 
 tools=(gcloud terraform gh python3)
@@ -127,7 +162,7 @@ fi
 
 printf '==> Checking active gcloud account\n'
 active_account="$(gcloud config get-value account 2>/dev/null || true)"
-if [ -z "$active_account" ]; then
+if [ -z "$active_account" ] || [ "$active_account" = "(unset)" ]; then
   die "No active gcloud account found. Run gcloud auth login first."
 fi
 printf '  Active gcloud account: %s\n' "$active_account"
