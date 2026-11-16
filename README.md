@@ -1,18 +1,18 @@
 # GCP Launchpad
 
-`gcp-launchpad` is the AI-native entry hub for the `choo737` Google Cloud template suite.
+`gcp-launchpad` is the starting repo for the `choo737` Google Cloud template set.
 
-It routes teams from business requirements to private, production-ready Google Cloud repositories.
+Use it to map requirements, inspect existing GCP projects, and spin up private repositories.
 
 ## Template Suite Overview
 
 <picture>
   <source type="image/webp" srcset="assets/cloud-city-launchpad.webp">
-  <img src="assets/cloud-city-launchpad.gif" alt="Cloud City four-layer Google Cloud platform architecture" width="100%">
+  <img src="assets/cloud-city-launchpad.gif" alt="Four-layer Google Cloud platform overview" width="100%">
 </picture>
 
-Cloud City models four layers: 01 Bedrock/Wiring/Grid, 02 Transit/Cargo Intake, 03 Refinery/Piping, and 04 Skyline/AI.
-Each downstream repository builds and highlights its own active layer inside the suite.
+Each repository owns one layer: `01` foundation, `02` ingestion, `03` warehouse, and `04` apps and agents.
+Together they fit into a single Google Cloud environment without overlapping ownership.
 
 | Template Repository | Status | Included Capabilities | Best For |
 | --- | --- | --- | --- |
