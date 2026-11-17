@@ -55,10 +55,18 @@ Provision the Greenfield landing zone in `gcp-foundation`, or run the Brownfield
 ### Option A: Greenfield (`gcp-foundation`)
 
 1. Deploy `foundation/01-org-governance` once to apply 36 Org Policies, locked audit bucket, FinOps budgets, and SCC tier.
-2. Deploy `foundation/02-security-network` per environment (`dev`, `staging`, `prod`) for Shared VPC, KMS, NGFW, `BackupVault`, and VPC-SC.
-3. Keep `enforce_vpc_sc = false` initially so VPC-SC runs in `DRY_RUN` mode while validating traffic.
-4. Deploy `data/enterprise/01-platform` and `data/enterprise/02-governance-ops` per environment (`dev`, `staging`, `prod`).
-5. Export non-sensitive stage outputs per environment to Cloud Storage with `scripts/link-stages.sh`.
+2. Link outputs between `gcp-foundation` stages using `./scripts/link-stages.sh` before deploying each environment (`dev`, `staging`, `prod`).
+
+```bash
+./scripts/link-stages.sh --env <env> foundation/01-org-governance foundation/02-security-network
+./scripts/link-stages.sh --env <env> foundation/01-org-governance foundation/02-security-network data/enterprise/01-platform
+./scripts/link-stages.sh --env <env> data/enterprise/01-platform data/enterprise/02-governance-ops
+```
+
+3. Deploy `foundation/02-security-network` per environment (`dev`, `staging`, `prod`) for Shared VPC, KMS, NGFW, `BackupVault`, and VPC-SC.
+4. Keep `enforce_vpc_sc = false` initially so VPC-SC runs in `DRY_RUN` mode while validating traffic.
+5. Deploy `data/enterprise/01-platform` and `data/enterprise/02-governance-ops` per environment (`dev`, `staging`, `prod`).
+6. Export non-sensitive stage outputs per environment to Cloud Storage with `scripts/link-stages.sh`.
 
 ```bash
 ./scripts/link-stages.sh --env <env> \
@@ -66,13 +74,22 @@ Provision the Greenfield landing zone in `gcp-foundation`, or run the Brownfield
   foundation/02-security-network data/enterprise/01-platform data/enterprise/02-governance-ops
 ```
 
-6. Inspect `DRY_RUN` VPC-SC logs in Log Analytics, update ingress rules, then flip `enforce_vpc_sc = true` (`DRY_RUN -> ENFORCED`).
+7. Inspect `DRY_RUN` VPC-SC logs in Log Analytics, update ingress rules, then flip `enforce_vpc_sc = true` (`DRY_RUN -> ENFORCED`).
 
 ### Option B: Brownfield Bridge (`gcp-launchpad`)
 
 1. Follow `.agents/skills/brownfield-bridge/SKILL.md` using read-only `gcloud` and `bq` commands to verify existing IDs.
-2. Populate `existing_landing_zone` inside gitignored `platform-context.json`.
-3. Run `python3 scripts/generate-brownfield-link.py` targeting `gcp-data-ingestion/stages/enterprise/variables.tf`.
+2. Populate `existing_landing_zone` (and optional `by_environment`) inside gitignored `platform-context.json`.
+3. Run `python3 scripts/generate-brownfield-link.py` targeting `gcp-data-ingestion/stages/enterprise/variables.tf` per environment.
+
+```bash
+python3 scripts/generate-brownfield-link.py \
+  --context platform-context.json \
+  --env dev \
+  --target-variables-tf ../gcp-data-ingestion/stages/enterprise/variables.tf \
+  --output ../gcp-data-ingestion/stages/enterprise/00_linked.auto.tfvars.json
+```
+
 4. Verify the emitted `00_linked.auto.tfvars.json` has `0600` file permissions and remains gitignored.
 
 ## Step 3 — Day 1B: Ingestion Rollout (`gcp-data-ingestion`)

@@ -6,22 +6,19 @@ Use it to map requirements, inspect existing GCP projects, and spin up private r
 
 ## Template Suite Overview
 
-<picture>
-  <source type="image/webp" srcset="assets/cloud-city-launchpad.webp">
-  <img src="assets/cloud-city-launchpad.gif" alt="Four-layer Google Cloud platform overview" width="100%">
-</picture>
+<img src="assets/cloud-city-launchpad.webp" alt="Four-layer Google Cloud platform overview" width="100%">
 
 Each repository owns one layer: `01` foundation, `02` ingestion, `03` warehouse, and `04` apps and agents.
 Together they fit into a single Google Cloud environment without overlapping ownership.
 
 | Template Repository | Status | Included Capabilities | Best For |
 | --- | --- | --- | --- |
-| **gcp-launchpad** *(this repo — Suite Overview, Architecture Router & Brownfield Bridge)* | Active | Architecture intake questionnaire, preflight checks, Brownfield bridge generator, and cross-repo operational playbook | Multi-repo Greenfield or Brownfield planning and team handoffs |
-| [gcp-foundation](https://github.com/choo737/gcp-foundation) | Active | Landing Zone, Multi-Env Folders (`dev`/`staging`/`prod`), Shared VPC, VPC-SC, Cloud KMS, SCC (`NONE`/`STANDARD`/`PREMIUM`), Locked Audit Logs, BigQuery Platform, and Keyless GitHub WIF | Greenfield orgs, regulated FSI/BNM RMiT platforms, or brownfield data folders |
-| [gcp-data-ingestion](https://github.com/choo737/gcp-data-ingestion) | Active | Datastream CDC (PSC/VPC), Zero-Dataflow Pub/Sub BigQuery Streaming + DLQ, Cloud Run v2 GCS Batch ELT + Quarantine, Cloud Workflows, and Optional Composer 3 DAG | Greenfield linked from `gcp-foundation` or standalone Brownfield landing zones |
-| [gcp-data-medallion](https://github.com/choo737/gcp-data-medallion) | Active | Dataform `3.1.5` SQLX Medallion (`01_bronze` -> `02_silver` SCD2 + Unified Orders -> `03_gold` marts), Dual-Tier PII Policy Tags, Dataplex Auto DQ, and Tag-Gated Release Promotion | Greenfield or standalone Brownfield BigQuery Bronze tables (Datastream, Fivetran, Airbyte) |
-| `gcp-webapp` *(Planned)* | Roadmap | Regional/Multi-Region HA Web App with External HTTPS Load Balancer, Cloud Armor WAF, Cloud Run v2, and Cloud SQL HA/DR | Customer portals and APIs on Greenfield or Brownfield VPCs |
-| `gcp-adk-agent` *(Planned)* | Roadmap | Production Google ADK Agent with Vertex AI Agent Engine Runtime or Cloud Run v2, Evaluation Gate, Cloud Trace, and Secret Manager | Enterprise AI agents routed via questionnaire runtime choice |
+| **gcp-launchpad** *(this repo)* | Active | Intake questionnaire, preflight checks, Brownfield bridge, and playbook | Multi-repo planning and team handoffs |
+| [gcp-foundation](https://github.com/choo737/gcp-foundation) | Active | Landing Zone, Folders, Shared VPC, VPC-SC, KMS, SCC, Audit Logs, BigQuery, WIF | Greenfield orgs, regulated FSI, or brownfield folders |
+| [gcp-data-ingestion](https://github.com/choo737/gcp-data-ingestion) | Active | Datastream CDC, Pub/Sub Streaming + DLQ, Cloud Run Batch ELT, Workflows, Composer 3 | Greenfield linked or standalone Brownfield zones |
+| [gcp-data-medallion](https://github.com/choo737/gcp-data-medallion) | Active | Dataform `3.1.5` SQLX Medallion, Dual-Tier PII Tags, Dataplex Auto DQ, Tag Promotion | Greenfield or standalone Brownfield BigQuery Bronze |
+| `gcp-webapp` *(Planned)* | Roadmap | HA Web App with HTTPS Load Balancer, Cloud Armor, Cloud Run, Cloud SQL | Customer portals on Greenfield or Brownfield VPCs |
+| `gcp-adk-agent` *(Planned)* | Roadmap | Google ADK Agent on Agent Engine or Cloud Run with Eval Gate | Enterprise AI agents routed via runtime choice |
 
 ## Create Your Private Repository (Do Not Fork Publicly)
 

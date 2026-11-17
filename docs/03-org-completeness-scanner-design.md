@@ -8,7 +8,10 @@ It checks live GCP resources against sixteen platform areas (`D00` through `D15`
 
 ## Scanner Architecture
 
-A Cloud Run service behind Cloud IAP queries twelve read-only GCP APIs on demand.
+A Cloud Run service behind Cloud IAP executes `16` read-only API checks on demand.
+
+The visual diagram shows twelve physical areas (`D00` through `D11`).
+Four Layer-`01` control-plane sub-checks (`D12` through `D15`) attach onto `D01`, `D05`, `D02`, and `D04`.
 
 It never writes resources, changes IAM bindings, or stores customer secrets on disk.
 
@@ -32,7 +35,8 @@ flowchart LR
 
 ## 16-Area Control-Plane Checks
 
-Each check maps one visual area on the diagram to concrete GCP APIs.
+Checks `D00` through `D11` map to the twelve diagram areas.
+Checks `D12` through `D15` add Layer-`01` FinOps, Backup, NGFW, and SCC verification on top.
 
 | ID | Diagram Area | Layer | GCP APIs Queried | Expected Signals |
 | --- | --- | --- | --- | --- |
@@ -48,10 +52,10 @@ Each check maps one visual area on the diagram to concrete GCP APIs.
 | `D09` | Filter lab & gold vaults | `03` | Data Catalog, Dataplex, BigQuery | PII policy tags, AutoDQ scans, Gold marts |
 | `D10` | Office towers | `04` | Cloud Armor, Cloud Run, GKE, Cloud SQL | HTTPS load balancer, WAF policy, regional HA database |
 | `D11` | Control tower & bridge | `04` | Vertex AI, Model Armor, Cloud Trace | ADK agent runtime (`gcp-adk-agent`), guardrails, traces |
-| `D12` | FinOps treasury | `01` | Cloud Billing, Billing Budgets, BigQuery | Dedicated `<prefix>-cmn-finops` project, billing export dataset, multi-budget Google Group alert channels |
-| `D13` | Backup vault | `01` | Backup and DR, Cloud Storage | Central `BackupVault` enforced retention, `BackupPlan` schedules, GCS `soft_delete_policy` |
-| `D14` | Firewall fabric | `01` | Compute Engine, Resource Manager | Folder Hierarchical + VPC Global NGFW Threat Intelligence rules, `GCE_FIREWALL` IAM Secure Tags |
-| `D15` | Security center | `01` | Security Command Center, Cloud KMS, Pub/Sub | Stage-01 Audit KMS CMEK on `<prefix>_scc_findings` export/Pub/Sub, active SCC runtime detectors |
+| `D12` | City hall (`D01` FinOps sub-check) | `01` | Cloud Billing, Billing Budgets, Monitoring, BigQuery | `<prefix>-cmn-finops` project, billing export dataset, budget alert channels |
+| `D13` | Log vault (`D05` Backup sub-check) | `01` | Backup and DR, Cloud Storage | Central `BackupVault` enforced retention, `BackupPlan` schedules, GCS `soft_delete_policy` |
+| `D14` | Power substation (`D02` NGFW sub-check) | `01` | Compute Engine, Resource Manager | Folder and VPC NGFW Threat Intelligence rules, `GCE_FIREWALL` tags |
+| `D15` | Perimeter wall (`D04` SCC sub-check) | `01` | Security Command Center, Cloud KMS, Pub/Sub | Audit CMEK on `<prefix>_scc_findings` export, Pub/Sub, runtime detectors |
 
 ## Status Values
 
@@ -63,38 +67,53 @@ Each check maps one visual area on the diagram to concrete GCP APIs.
 
 ## Required Read-Only IAM Roles
 
-Grant these four least-privilege roles to the scanner service account at the target folder or org.
+Grant these least-privilege roles to the scanner service account at the target folder or organization.
+Bind `roles/billing.viewer` separately on the target **Cloud Billing Account**.
 
-| IAM Role | Covered APIs | Purpose |
-| --- | --- | --- |
-| `roles/cloudasset.viewer` | Cloud Asset Inventory | Discover folders, projects, VPCs, GCS, BigQuery, KMS, and Run |
-| `roles/orgpolicy.policyViewer` | Org Policy v2 | Verify the 36 baseline Org Policy constraints |
-| `roles/accesscontextmanager.policyReader` | Access Context Manager | Inspect dry-run and enforced VPC-SC perimeters |
-| `roles/logging.viewer` | Cloud Logging | Check `2555`-day audit log sinks and locked buckets |
-
-Add `roles/dataform.viewer` and `roles/dataplex.viewer` when scanning Layer 03 release configs and quality scans.
-
-Add `roles/billing.viewer`, `roles/backupdr.viewer`, `roles/compute.networkViewer`, and `roles/securitycenter.findingsViewer` for `D12` through `D15` checks.
+| IAM Role | Scope | Covered APIs | Purpose |
+| --- | --- | --- | --- |
+| `roles/cloudasset.viewer` | Org / Folder | Cloud Asset Inventory | Discover folders, projects, VPCs, GCS, BigQuery, KMS |
+| `roles/orgpolicy.policyViewer` | Org / Folder | Org Policy v2 | Verify the 36 baseline Org Policy constraints |
+| `roles/accesscontextmanager.policyReader` | Org | Access Context Manager | Inspect dry-run and enforced VPC-SC perimeters |
+| `roles/logging.viewer` | Org / Folder | Cloud Logging | Check `2555`-day audit log sinks and locked buckets |
+| `roles/dataform.viewer` | Folder / Project | Dataform | Inspect Dataform repositories and release configurations |
+| `roles/dataplex.viewer` | Folder / Project | Dataplex | Inspect AutoDQ and data profile scans |
+| `roles/compute.networkViewer` | Folder / Project | Compute Engine | Inspect Shared VPC hosts, subnets, and attachments |
+| `roles/compute.orgFirewallPolicyUser` | Org / Folder | Compute Firewall Policy | Inspect folder hierarchical and VPC NGFW policies |
+| `roles/resourcemanager.tagViewer` | Org / Folder | Resource Manager Tags | Inspect `GCE_FIREWALL` IAM secure tag keys and values |
+| `roles/monitoring.viewer` | Project | Cloud Monitoring | Inspect FinOps and SCC alert notification channels |
+| `roles/backupdr.viewer` | Project | Backup and DR | Inspect `BackupVault` enforced retention and `BackupPlan` jobs |
+| `roles/securitycenter.adminViewer` | Org / Folder | Security Command Center | Inspect SCC exports, notifications, mutes, and detectors |
+| `roles/billing.viewer` | **Cloud Billing Account** | Cloud Billing & Budgets | Inspect billing account export links and monthly budgets |
 
 ## Deterministic Verification Commands
 
-Run `gcloud asset search-all-resources` with neutral folder or org scope to validate scanner coverage.
+Run `gcloud asset search-all-resources` and read-only CLI checks to validate all `16` areas.
 
 ```bash
-# Inspect folders and projects under the target organization
+# D00, D01, D05: Inspect folders and projects under the target organization
 gcloud asset search-all-resources \
   --scope="organizations/<YOUR_ORG_ID>" \
   --asset-types="cloudresourcemanager.googleapis.com/Folder,cloudresourcemanager.googleapis.com/Project"
 
-# Inspect KMS keys, Shared VPCs, and BigQuery datasets in a folder
+# D02, D03, D08, D09: Inspect KMS keys, Shared VPCs, and BigQuery datasets in a folder
 gcloud asset search-all-resources \
   --scope="folders/<YOUR_FOLDER_ID>" \
   --asset-types="cloudkms.googleapis.com/CryptoKey,compute.googleapis.com/Network,bigquery.googleapis.com/Dataset"
 
-# Inspect Cloud Run services, Workflows, Dataform repos, and Dataplex scans
+# D06-D11: Inspect Cloud Run services, Workflows, Dataform repos, and Dataplex scans
 gcloud asset search-all-resources \
   --scope="folders/<YOUR_FOLDER_ID>" \
   --asset-types="run.googleapis.com/Service,workflows.googleapis.com/Workflow,dataform.googleapis.com/Repository,dataplex.googleapis.com/DataScan"
+
+# D12-D15: Inspect Backup vaults/plans, Firewall policies, Secure Tags, GCS buckets, and Pub/Sub topics
+gcloud asset search-all-resources \
+  --scope="folders/<YOUR_FOLDER_ID>" \
+  --asset-types="backupdr.googleapis.com/BackupVault,backupdr.googleapis.com/BackupPlan,compute.googleapis.com/FirewallPolicy,cloudresourcemanager.googleapis.com/TagKey,storage.googleapis.com/Bucket,pubsub.googleapis.com/Topic"
+
+# D12 & D15: Verify Cloud Billing budgets (Billing Account scope) and SCC BigQuery exports
+gcloud billing budgets list --billing-account="<YOUR_BILLING_ACCOUNT_ID>"
+gcloud scc bqexports list --folder="<YOUR_FOLDER_ID>" --location="global"
 ```
 
 Compare command output against `platform-context.json` before cutting over brownfield or greenfield environments.

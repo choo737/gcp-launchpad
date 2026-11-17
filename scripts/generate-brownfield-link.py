@@ -12,14 +12,21 @@ import sys
 import tempfile
 
 PROJECT_ID_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
-DATASET_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,1024}$")
+DATASET_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 BUCKET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$")
 ENVIRONMENT_RE = re.compile(r"^(dev|staging|prod)$")
-PREFIX_RE = re.compile(r"^[a-z](?:[a-z0-9-]{0,6}[a-z0-9])$")
+PREFIX_RE = re.compile(r"^[a-z][a-z0-9-]{1,6}[a-z0-9]$")
 REGION_RE = re.compile(r"^[a-z]+-[a-z]+[0-9]+$")
 DATAFORM_SHORT_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 DATAFORM_PATH_RE = re.compile(
-    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/repositories/[A-Za-z0-9._-]+$"
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/repositories/[A-Za-z0-9_-]{1,100}$"
+)
+RELEASE_CONFIG_PATH_RE = re.compile(
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/repositories/[A-Za-z0-9_-]{1,100}/releaseConfigs/[A-Za-z0-9_-]{1,100}$"
+)
+DATAPLEX_SCAN_SHORT_RE = re.compile(r"^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+DATAPLEX_SCAN_PATH_RE = re.compile(
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/dataScans/[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$"
 )
 SA_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 KMS_KEY_RE = re.compile(
@@ -92,12 +99,95 @@ ALIAS_PAIRS = (
     ("core_project_id", "core_storage_project_id"),
     ("compute_project_id", "etl_compute_project_id"),
     ("analytics_project_id", "primary_gold_project_id"),
-    ("bi_project_id", "bi_compute_project_id"),
     ("gold_dataset_id", "primary_gold_dataset_id"),
+    ("dataform_release_config_name", "dataform_release_config_id"),
     ("kms_key_id", "kms_key_name"),
     ("vpc_id", "network_id"),
     ("dataform_sa_email", "dataform_service_account_email"),
 )
+
+ALIAS_RHS_TO_LHS = {alias: primary for primary, alias in ALIAS_PAIRS}
+VALID_LANDING_ZONE_KEYS = frozenset(FIELD_FLAGS) | frozenset(ALIAS_RHS_TO_LHS)
+
+# Mirrors gcp-data-ingestion/stages/enterprise/variables.tf so unfiltered
+# output never emits foundation-only keys (for example finops_project_id).
+INGESTION_DECLARED_VARS = frozenset({
+    "core_storage_project_id",
+    "core_project_id",
+    "etl_compute_project_id",
+    "compute_project_id",
+    "primary_gold_project_id",
+    "analytics_project_id",
+    "bi_project_id",
+    "governance_project_id",
+    "bronze_dataset_id",
+    "silver_dataset_id",
+    "primary_gold_dataset_id",
+    "gold_dataset_id",
+    "quarantine_dataset_id",
+    "assertions_dataset_id",
+    "landing_bucket_name",
+    "ops_telemetry_dataset_id",
+    "dataform_repository_name",
+    "dataform_release_config_name",
+    "dataform_release_config_id",
+    "dataform_git_commitish",
+    "dataform_service_account_email",
+    "dataform_sa_email",
+    "batch_loader_sa_email",
+    "pubsub_writer_sa_email",
+    "dataplex_scan_names",
+    "dataplex_profile_scan_id",
+    "dataplex_quality_scan_id",
+    "kms_key_id",
+    "kms_key_name",
+    "pii_restricted_policy_tag_id",
+    "pii_masked_policy_tag_id",
+    "vpc_id",
+    "network_id",
+    "subnet_id",
+    "batch_vpc_egress",
+    "artifact_registry_repository_uri",
+    "batch_image_tag",
+    "notification_channel_ids",
+    "alert_email_addresses",
+    "region",
+    "environment",
+    "prefix",
+    "delete_contents_on_destroy",
+    "enable_pubsub_stream",
+    "pubsub_schema_type",
+    "pubsub_target_table_id",
+    "enable_batch_job",
+    "batch_container_image",
+    "batch_source_prefix",
+    "batch_target_table",
+    "batch_source_format",
+    "enable_datastream_cdc",
+    "datastream_source_engine",
+    "datastream_db_host",
+    "datastream_db_port",
+    "datastream_db_username",
+    "datastream_db_database",
+    "datastream_db_password_secret_version",
+    "datastream_cdc_mode",
+    "datastream_create_private_connection",
+    "datastream_network_attachment",
+    "datastream_network_attachment_id",
+    "datastream_peering_cidr",
+    "datastream_create_without_validation",
+    "enable_pipeline_workflow",
+    "enable_schedule",
+    "schedule_cron",
+    "enable_gcs_eventarc_trigger",
+    "propagation_wait_seconds",
+    "labels",
+    "pubsub_streams",
+    "batch_jobs",
+    "enable_shared_datastream_private_connection",
+    "shared_datastream_private_connection_id",
+    "datastream_streams",
+})
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -111,6 +201,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--context",
         type=Path,
         help="Path to platform-context.json containing existing_landing_zone values.",
+    )
+    parser.add_argument(
+        "--env",
+        dest="env",
+        default=None,
+        help="Target environment (dev, staging, prod) for by_environment resolution.",
     )
     for field in FIELD_FLAGS:
         flag = "--" + field.replace("_", "-")
@@ -145,29 +241,117 @@ def _validate_dataform_repository(value: str) -> None:
         )
 
 
-def load_context_values(context_path: Path) -> dict[str, str]:
+def _validate_release_config(value: str) -> None:
+    if not (DATAFORM_SHORT_RE.match(value) or RELEASE_CONFIG_PATH_RE.match(value)):
+        raise ValueError(
+            f"Invalid dataform_release_config_name '{value}': expected short name "
+            "or projects/<project>/locations/<region>/repositories/<repo>/releaseConfigs/<name>"
+        )
+
+
+def _validate_dataplex_scan(name: str, value: str) -> None:
+    if not (DATAPLEX_SCAN_SHORT_RE.match(value) or DATAPLEX_SCAN_PATH_RE.match(value)):
+        raise ValueError(
+            f"Invalid {name} '{value}': expected short scan ID "
+            "or projects/<project>/locations/<region>/dataScans/<scan_id>"
+        )
+
+
+def _normalize_landing_zone_dict(
+    mapping: dict[object, object], context_label: str
+) -> dict[str, str]:
+    cleaned: dict[str, str] = {}
+    for key, raw_val in mapping.items():
+        if not isinstance(key, str) or key not in VALID_LANDING_ZONE_KEYS:
+            raise ValueError(f"Unknown key in {context_label}: {key}")
+        if raw_val is None:
+            continue
+        if not isinstance(raw_val, str):
+            raise ValueError(
+                f"{context_label}.{key} must be a string, got {type(raw_val).__name__}"
+            )
+        stripped = raw_val.strip()
+        if stripped:
+            cleaned[key] = stripped
+
+    for primary, alias in ALIAS_PAIRS:
+        if primary in cleaned and alias in cleaned and cleaned[primary] != cleaned[alias]:
+            raise ValueError(
+                f"Conflicting values for {primary} and alias {alias} in {context_label}"
+            )
+
+    normalized: dict[str, str] = {}
+    for key, val in cleaned.items():
+        canonical = ALIAS_RHS_TO_LHS.get(key, key)
+        if canonical not in normalized:
+            normalized[canonical] = val
+    return normalized
+
+
+def load_context_values(
+    context_path: Path, target_env: str | None = None
+) -> dict[str, str]:
     if not context_path.is_file():
         raise FileNotFoundError(f"Context file not found: {context_path}")
     payload = json.loads(context_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("platform-context.json must contain a JSON object.")
 
+    if target_env is not None:
+        _validate_pattern("env", target_env, ENVIRONMENT_RE)
+
     values: dict[str, str] = {}
     landing_zone = payload.get("existing_landing_zone")
     if landing_zone is not None:
         if not isinstance(landing_zone, dict):
             raise ValueError("existing_landing_zone must be a JSON object.")
-        for key, raw_val in landing_zone.items():
-            if key not in FIELD_FLAGS:
-                continue
-            if raw_val is None:
-                continue
-            if not isinstance(raw_val, str):
+
+        base_raw = {k: v for k, v in landing_zone.items() if k != "by_environment"}
+        values.update(_normalize_landing_zone_dict(base_raw, "existing_landing_zone"))
+
+        if "by_environment" in landing_zone:
+            by_env = landing_zone["by_environment"]
+            if not isinstance(by_env, dict) or not by_env:
                 raise ValueError(
-                    f"existing_landing_zone.{key} must be a string, got {type(raw_val).__name__}"
+                    "existing_landing_zone.by_environment must be a non-empty JSON object."
                 )
-            if raw_val.strip():
-                values[key] = raw_val.strip()
+
+            normalized_by_env: dict[str, dict[str, str]] = {}
+            for env_key, env_obj in by_env.items():
+                if not isinstance(env_key, str) or not ENVIRONMENT_RE.match(env_key):
+                    raise ValueError(
+                        f"Invalid environment key '{env_key}' in existing_landing_zone.by_environment"
+                    )
+                if not isinstance(env_obj, dict):
+                    raise ValueError(
+                        f"existing_landing_zone.by_environment.{env_key} must be a JSON object."
+                    )
+                normalized_by_env[env_key] = _normalize_landing_zone_dict(
+                    env_obj, f"existing_landing_zone.by_environment.{env_key}"
+                )
+
+            selected_env = target_env
+            if selected_env is None:
+                selected_env = values.get("environment")
+            if selected_env is None:
+                envs = payload.get("environments")
+                if (
+                    isinstance(envs, list)
+                    and envs
+                    and isinstance(envs[0], str)
+                    and envs[0].strip()
+                ):
+                    selected_env = envs[0].strip()
+
+            if not selected_env or selected_env not in normalized_by_env:
+                raise ValueError(
+                    f"Environment '{selected_env}' not found in existing_landing_zone.by_environment"
+                )
+
+            values.update(normalized_by_env[selected_env])
+            values["environment"] = selected_env
+        elif target_env is not None:
+            values["environment"] = target_env
 
     top_level_mappings = (
         ("primary_region", "region"),
@@ -179,9 +363,12 @@ def load_context_values(context_path: Path) -> dict[str, str]:
             values[dst_key] = raw_val.strip()
 
     if "environment" not in values:
-        envs = payload.get("environments")
-        if isinstance(envs, list) and envs and isinstance(envs[0], str) and envs[0].strip():
-            values["environment"] = envs[0].strip()
+        if target_env is not None:
+            values["environment"] = target_env
+        else:
+            envs = payload.get("environments")
+            if isinstance(envs, list) and envs and isinstance(envs[0], str) and envs[0].strip():
+                values["environment"] = envs[0].strip()
 
     return values
 
@@ -219,6 +406,13 @@ def validate_inputs(values: dict[str, str]) -> None:
     )
     _validate_dataform_repository(values["dataform_repository_name"])
 
+    if values.get("dataform_release_config_name"):
+        _validate_release_config(values["dataform_release_config_name"])
+
+    for scan_field in ("dataplex_profile_scan_id", "dataplex_quality_scan_id"):
+        if values.get(scan_field):
+            _validate_dataplex_scan(scan_field, values[scan_field])
+
     for field in (
         "dataform_sa_email",
         "batch_loader_sa_email",
@@ -243,13 +437,6 @@ def validate_inputs(values: dict[str, str]) -> None:
             values["datastream_network_attachment_id"],
             NETWORK_ATTACHMENT_RE,
         )
-    for short_field in (
-        "dataform_release_config_name",
-        "dataplex_profile_scan_id",
-        "dataplex_quality_scan_id",
-    ):
-        if values.get(short_field):
-            _validate_pattern(short_field, values[short_field], DATAFORM_SHORT_RE)
     if values.get("pii_restricted_policy_tag_id"):
         _validate_pattern(
             "pii_restricted_policy_tag_id",
@@ -296,8 +483,10 @@ def build_linked_tfvars(
         declared = set(
             TF_VAR_DECL_RE.findall(target_variables_tf.read_text(encoding="utf-8"))
         )
-        linked = {k: v for k, v in linked.items() if k in declared}
+    else:
+        declared = INGESTION_DECLARED_VARS
 
+    linked = {k: v for k, v in linked.items() if k in declared}
     return dict(sorted(linked.items()))
 
 
@@ -323,9 +512,17 @@ def write_atomic_json(output_path: Path, payload: dict[str, str]) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
+        target_env: str | None = None
+        if args.env is not None:
+            cleaned_env = args.env.strip()
+            _validate_pattern("env", cleaned_env, ENVIRONMENT_RE)
+            target_env = cleaned_env
+
         values: dict[str, str] = {}
         if args.context is not None:
-            values.update(load_context_values(args.context))
+            values.update(load_context_values(args.context, target_env=target_env))
+        elif target_env is not None:
+            values["environment"] = target_env
 
         for field in FIELD_FLAGS:
             cli_val = getattr(args, field, None)

@@ -41,7 +41,7 @@ Select one compliance profile for audit retention, key protection, FinOps, backu
 | Backup & DR Vault Retention | Disabled (`false`) | `14` days (`lock = false`) | `30` days (`lock = false`) |
 | GCS Soft Delete Policy | `7` days | `14` days | `30` days |
 | Cloud NGFW Tier | `Essentials` | `NGFW Standard` | `NGFW Standard` (`NGFW Enterprise` opt-in) |
-| SCC Tier & Scope | `NONE` | `STANDARD` (org/folder) | `PREMIUM` + Runtime Detectors |
+| SCC Tier & Scope | `NONE` | `STANDARD` (`FOLDER`/`PROJECT`) | `PREMIUM` + Runtime Detectors |
 | VPC-SC | `Disabled` | `DRY_RUN` non-prod / `ENFORCED` prod | `DRY_RUN` non-prod / `ENFORCED` prod |
 
 ### Pillar 1: FinOps Governance & Billing Export
@@ -50,31 +50,31 @@ Isolate billing data and route multi-tier spend alerts to Google Groups.
 
 - **`create_dedicated_finops_project`**: Use `<prefix>-cmn-finops` in `enterprise_standard` and `regulated_fsi_rmit`. Co-locate inside `<prefix>-audit` for `sandbox_poc`.
 - **Architecture references**: Follow [Billing Export Setup](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-setup) and [Landing Zone Design](https://docs.cloud.google.com/docs/migration/plan/landing-zones).
-- **`billing_export_location` (`"US"` default)**: Choose `"US"` multi-region for automatic 2-month spend backfill per [Billing Export Guide](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery).
-- **`billing_export_location` (`"asia-southeast1"` option)**: Choose `"asia-southeast1"` (forward-only) for strict metadata residency or direct SQL joins with `<prefix>_ops_telemetry`.
+- **`finops_billing_export_location` (`"US"` default)**: Choose `"US"` multi-region for automatic 2-month spend backfill per [Billing Export Guide](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery).
+- **`finops_billing_export_location` (`"asia-southeast1"` option)**: Choose `"asia-southeast1"` (forward-only) for strict metadata residency or direct joins with `<prefix>_ops_telemetry`.
 - **Console toggle step**: Complete the one-time Cloud Console Billing Export toggle after Terraform creates the export dataset.
-- **Multi-budget map**: Define `master`, `dev`/`staging`/`prod`, and workload budgets with `50/80/90/100%` actual and `100%` forecasted thresholds.
-- **Alert routing**: Route alerts to `gcp-finops-alerts@<domain>`, `gcp-billing-admins@<domain>`, and `<team>-owners@<domain>` (max 5 channels per budget) plus Pub/Sub.
+- **Budget controls**: Set `monthly_budget_amount`, `environment_budgets`, `workload_budgets`, `budget_thresholds` (`[0.5, 0.8, 0.9, 1.0]`), and `enable_forecasted_threshold` (`100%` forecasted).
+- **Alert routing (`finops_alert_email_addresses`)**: Route alerts to `gcp-finops-alerts@<domain>` and `gcp-billing-admins@<domain>` (max 5 channels per budget).
 
 ### Pillar 2: Backup & Disaster Recovery
 
 Protect stateful storage, BigQuery datasets, and compliance recovery objectives.
 
-- **`enable_backup_dr`**: Provision central `<prefix>-cmn-backup` with an immutable `BackupVault` (`14d` standard / `30d` FSI enforced retention).
+- **`enable_backup_dr`**: Provision central `<prefix>-cmn-backup` with an immutable `BackupVault`.
+- **`backup_enforced_retention_days`**: Set `14` days for `enterprise_standard` or `30` days for `regulated_fsi_rmit`.
 - **`lock_backup_vault` safety gate**: Keep irreversible WORM vault locking set to `false` by default until production cutover.
-- **GCS `soft_delete_policy`**: Set `14d` for `enterprise_standard` or `30d` for `regulated_fsi_rmit`.
-- **GCS dual-region `rpo`**: Choose `DEFAULT` or `ASYNC_TURBO` (contractual 15-minute RPO SLA per [Cloud Storage SLA](https://cloud.google.com/storage/sla)).
-- **FSI check 1 (SLA proof)**: Confirm whether critical buckets require contractual `RPO <= 15m` audit proof.
-- **FSI check 2 (BNM RMiT residency)**: Confirm whether pairing `asia-southeast1` + `asia-southeast2` violates national border residency rules. If restricted, keep single-region buckets and a regional `BackupVault`.
-- **BigQuery DR**: Use `168h` time travel plus 7d fail-safe as baseline. Add opt-in `ALTER SCHEMA ... ADD REPLICA` or `ENTERPRISE_PLUS` failover instead of empty `*_dr` shell datasets.
+- **GCS `soft_delete_policy` (`soft_delete_retention_seconds`)**: Set `1209600` (`14d`) for `enterprise_standard` or `2592000` (`30d`) for `regulated_fsi_rmit`.
+- **Dual-region GCS (`enable_dual_region_gcs`, `gcs_rpo`)**: Choose `DEFAULT` or `ASYNC_TURBO` (15-minute RPO SLA per [Cloud Storage SLA](https://cloud.google.com/storage/sla)).
+- **FSI residency (`cross_border_dual_region_approved`)**: Confirm whether pairing `asia-southeast1` + `asia-southeast2` violates national border rules. Keep regional buckets if restricted.
+- **BigQuery DR (`bq_dr_mode`)**: Choose `time_travel_only`, `cross_region_replica` (`ALTER SCHEMA ... ADD REPLICA`), or `enterprise_plus_failover` instead of empty `*_dr` datasets.
 
 ### Pillar 3: Cloud NGFW & Network Security
 
 Enforce layered firewall policies with IAM-governed workload tags.
 
-- **2-layer policy**: Combine a `Folder Hierarchical Firewall Policy` with a `VPC Global Network Firewall Policy`.
-- **`GCE_FIREWALL` IAM Secure Tags**: Bind `tier=web`, `tier=app`, `tier=data`, and `access=allow-iap` tags instead of brittle IP lists.
-- **Tier selection**: Use `Essentials` (`sandbox_poc`), `NGFW Standard` default (`enterprise_standard`), or opt in via `enable_ngfw_enterprise`.
+- **`enable_hierarchical_firewall_policy` & `enable_ngfw_standard_rules`**: Combine a folder hierarchical firewall policy with a VPC global network policy.
+- **`enable_secure_tags` (`GCE_FIREWALL`)**: Bind `tier=web`, `tier=app`, `tier=data`, and `access=allow-iap` tags instead of static IP lists.
+- **Tier selection (`enable_ngfw_enterprise`)**: Default to `NGFW Standard`, or opt into `NGFW Enterprise` for regulated workloads.
 - **Upgrade criteria (`NGFW Enterprise`)**: Enable only when workloads require deep-packet IPS signatures, CVE virtual patching, or inline TLS inspection.
 - **Official references**: Review [Firewall Tiers](https://cloud.google.com/security/products/firewall) and [Firewall Pricing](https://cloud.google.com/firewall/pricing) before enabling enterprise inspection.
 
@@ -82,11 +82,11 @@ Enforce layered firewall policies with IAM-governed workload tags.
 
 Configure threat detection, finding exports, and security operations routing.
 
-- **Tier selection**: Choose `NONE`, `STANDARD`, or `PREMIUM`. Note that `SCC Enterprise` retires May 21, 2027.
-- **`scc_scope`**: Choose organization or folder activation versus project-level `PREMIUM` pay-as-you-go (`PAYG`) coverage.
-- **Audit KMS CMEK**: Encrypt `<prefix>_scc_findings` BigQuery exports and Pub/Sub topics using Stage-01 Audit KMS CMEK keys.
-- **Alert routing**: Route high and critical SCC findings to `gcp-secops-alerts@<domain>`.
-- **Runtime threat detectors**: Enable Event, Container, VM, and Cloud Run Threat Detection when running `PREMIUM`.
+- **`scc_tier`**: Choose `NONE`, `STANDARD`, or `PREMIUM`. Note that `SCC Enterprise` retires May 21, 2027.
+- **`scc_scope`**: Choose `FOLDER` activation versus `PROJECT` pay-as-you-go (`PAYG`) coverage.
+- **Audit KMS CMEK (`enable_audit_cmek`)**: Encrypt `<prefix>_scc_findings` BigQuery exports and Pub/Sub topics using Stage-01 Audit KMS keys.
+- **Alert routing (`scc_alert_email_addresses`)**: Route high and critical SCC findings to `gcp-secops-alerts@<domain>`.
+- **Runtime detectors (`runtime_detectors`)**: Select from `EVENT_THREAT_DETECTION`, `CONTAINER_THREAT_DETECTION`, `VIRTUAL_MACHINE_THREAT_DETECTION`, and `CLOUD_RUN_THREAT_DETECTION` when running `PREMIUM`.
 
 ## Section 4: Geography & Data Residency
 
@@ -101,7 +101,7 @@ Confirm where workloads and backup replicas must reside.
 Define environment tiers and short naming tokens so GCP project IDs stay within 30 characters.
 
 - **`environments`**: Choose active tiers from `dev`, `staging`, and `prod`.
-- **`prefix`**: Use 2 to 8 lowercase characters matching `^[a-z][a-z0-9-]{1,7}$`.
+- **`prefix`**: Use 3 to 8 lowercase characters matching `^[a-z][a-z0-9-]{1,6}[a-z0-9]$`.
 - **`project_suffix`**: Use up to 8 characters such as `dev01` to prevent soft-delete ID collisions.
 
 ## Section 6: GitOps & CI Identity

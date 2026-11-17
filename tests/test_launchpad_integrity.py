@@ -43,7 +43,6 @@ REQUIRED_FILES = (
     "AGENTS.md",
     "CLAUDE.md",
     "assets/cloud-city-launchpad.webp",
-    "assets/cloud-city-launchpad.gif",
     "assets/cloud-city-org-scanner.png",
     "docs/01-end-to-end-operational-playbook.md",
     "docs/02-template-documentation-standard.md",
@@ -151,6 +150,13 @@ BANNED_AI_WORDS = (
 EMOJI_PATTERN = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
 SECTION_SYMBOL = "\u00a7"
 BULLET_PREFIX_RE = re.compile(r"^(?:[-*]|\d+\.)\s+")
+MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+ABBREV_DOT_RE = re.compile(r"\b(e|i)\.g\.", re.IGNORECASE)
+TABLE_SEP_CELL_RE = re.compile(r"^:?-{3,}:?$")
+
+
+def _strip_md_links(text: str) -> str:
+    return MD_LINK_RE.sub(r"\1", text)
 
 
 def _iter_repo_files() -> list[Path]:
@@ -200,9 +206,15 @@ def _extract_markdown_sentences(text: str) -> list[str]:
         if not stripped or stripped.startswith(("#", "|", "---", "<picture", "</picture", "<source", "<img", "![")):
             flush_para()
             continue
+        if stripped.startswith(">"):
+            stripped = stripped.lstrip("> ").strip()
+            if not stripped or stripped.startswith("[!"):
+                flush_para()
+                continue
+        stripped = _strip_md_links(stripped)
         if BULLET_PREFIX_RE.match(stripped):
             flush_para()
-            prose_blocks.append(BULLET_PREFIX_RE.sub("", stripped).strip())
+            current_para.append(BULLET_PREFIX_RE.sub("", stripped).strip())
             continue
         current_para.append(stripped)
 
@@ -210,11 +222,41 @@ def _extract_markdown_sentences(text: str) -> list[str]:
 
     sentences: list[str] = []
     for block in prose_blocks:
-        for part in re.split(r"[.!?](?:\s+|$)", block):
-            cleaned = part.strip()
+        masked = ABBREV_DOT_RE.sub(lambda m: f"{m.group(1)}<DOT>g<DOT>", block)
+        for part in re.split(r"[.!?](?:\s+|$)", masked):
+            cleaned = part.replace("<DOT>", ".").strip()
             if cleaned:
                 sentences.append(cleaned)
     return sentences
+
+
+def _extract_markdown_table_cells(text: str) -> list[str]:
+    lines = text.splitlines()
+    in_code = False
+    in_frontmatter = False
+    cells: list[str] = []
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if idx == 0 and stripped == "---":
+            in_frontmatter = True
+            continue
+        if in_frontmatter:
+            if stripped == "---":
+                in_frontmatter = False
+            continue
+        if stripped.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code or not stripped.startswith("|"):
+            continue
+        raw_cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if raw_cells and all(TABLE_SEP_CELL_RE.match(c) for c in raw_cells if c):
+            continue
+        for cell in raw_cells:
+            cleaned = _strip_md_links(cell).strip()
+            if cleaned:
+                cells.append(cleaned)
+    return cells
 
 
 class LaunchpadIntegrityTest(unittest.TestCase):
@@ -231,9 +273,17 @@ class LaunchpadIntegrityTest(unittest.TestCase):
 
     def test_gitignore_patterns(self) -> None:
         gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-        for entry in ("platform-context.json", "*.tfvars", "*.tfvars.json", ".cm_project"):
+        for entry in (
+            "platform-context.json",
+            "terraform.tfvars",
+            "*.auto.tfvars",
+            "*.auto.tfvars.json",
+            ".cm_project",
+        ):
             with self.subTest(entry=entry):
                 self.assertIn(entry, gitignore)
+        for forbidden in ("*.tfvars", "*.tfvars.json"):
+            self.assertNotIn(forbidden, gitignore)
 
     def test_readme_canonical_ten_sections(self) -> None:
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
@@ -261,6 +311,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "QUESTIONNAIRE.md",
             "docs/01-end-to-end-operational-playbook.md",
             "docs/02-template-documentation-standard.md",
+            "docs/03-org-completeness-scanner-design.md",
             "platform-context.json",
             "scripts/preflight-check.sh",
             "scripts/generate-brownfield-link.py",
@@ -328,12 +379,125 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 self.assertEqual(payload["schema_version"], "1.0")
                 self.assertEqual(payload["adoption_mode"], mode)
                 self.assertTrue(required_keys.issubset(payload.keys()))
+                self.assertRegex(payload["prefix"], r"^[a-z][a-z0-9-]{1,6}[a-z0-9]$")
+                self.assertIn(payload["ci_identity_mode"], ("github_oidc_wif", "existing_ci_runner"))
                 self.assertIsInstance(payload["selected_templates"], list)
                 self.assertIsInstance(payload["environments"], list)
                 self.assertIsInstance(payload["existing_landing_zone"], dict)
-                for pillar in ("finops", "backup_dr", "ngfw", "scc"):
-                    self.assertIn(pillar, payload)
-                    self.assertIsInstance(payload[pillar], dict)
+
+                finops = payload["finops"]
+                self.assertEqual(
+                    set(finops.keys()),
+                    {
+                        "create_dedicated_finops_project",
+                        "finops_billing_export_location",
+                        "monthly_budget_amount",
+                        "environment_budgets",
+                        "workload_budgets",
+                        "budget_thresholds",
+                        "enable_forecasted_threshold",
+                        "finops_alert_email_addresses",
+                    },
+                )
+                self.assertIsInstance(finops["create_dedicated_finops_project"], bool)
+                self.assertIn(finops["finops_billing_export_location"], ("US", "EU", "asia-southeast1"))
+                self.assertIsInstance(finops["monthly_budget_amount"], (int, float))
+                self.assertNotIsInstance(finops["monthly_budget_amount"], bool)
+                self.assertGreater(finops["monthly_budget_amount"], 0)
+                self.assertIsInstance(finops["environment_budgets"], dict)
+                self.assertTrue(finops["environment_budgets"])
+                for amt in finops["environment_budgets"].values():
+                    self.assertIsInstance(amt, (int, float))
+                    self.assertNotIsInstance(amt, bool)
+                    self.assertGreater(amt, 0)
+                self.assertIsInstance(finops["workload_budgets"], dict)
+                for wb in finops["workload_budgets"].values():
+                    self.assertEqual(set(wb.keys()), {"amount", "projects", "labels", "alert_emails"})
+                    self.assertIsInstance(wb["amount"], (int, float))
+                    self.assertNotIsInstance(wb["amount"], bool)
+                    self.assertGreater(wb["amount"], 0)
+                    self.assertIsInstance(wb["projects"], list)
+                    self.assertIsInstance(wb["labels"], dict)
+                    self.assertIsInstance(wb["alert_emails"], list)
+                self.assertIsInstance(finops["budget_thresholds"], list)
+                self.assertTrue(finops["budget_thresholds"])
+                for ratio in finops["budget_thresholds"]:
+                    self.assertIsInstance(ratio, (int, float))
+                    self.assertNotIsInstance(ratio, bool)
+                    self.assertGreater(ratio, 0)
+                    self.assertLessEqual(ratio, 1.0)
+                self.assertIsInstance(finops["enable_forecasted_threshold"], bool)
+                self.assertIsInstance(finops["finops_alert_email_addresses"], list)
+                self.assertLessEqual(len(finops["finops_alert_email_addresses"]), 5)
+
+                bdr = payload["backup_dr"]
+                self.assertEqual(
+                    set(bdr.keys()),
+                    {
+                        "enable_backup_dr",
+                        "backup_enforced_retention_days",
+                        "lock_backup_vault",
+                        "soft_delete_retention_seconds",
+                        "enable_dual_region_gcs",
+                        "gcs_rpo",
+                        "cross_border_dual_region_approved",
+                        "bq_dr_mode",
+                    },
+                )
+                for bkey in (
+                    "enable_backup_dr",
+                    "lock_backup_vault",
+                    "enable_dual_region_gcs",
+                    "cross_border_dual_region_approved",
+                ):
+                    self.assertIsInstance(bdr[bkey], bool)
+                self.assertIn(bdr["backup_enforced_retention_days"], (14, 30))
+                self.assertEqual(
+                    bdr["soft_delete_retention_seconds"],
+                    bdr["backup_enforced_retention_days"] * 86400,
+                )
+                self.assertIn(bdr["gcs_rpo"], ("DEFAULT", "ASYNC_TURBO"))
+                self.assertIn(
+                    bdr["bq_dr_mode"],
+                    ("time_travel_only", "cross_region_replica", "enterprise_plus_failover"),
+                )
+
+                ngfw = payload["ngfw"]
+                self.assertEqual(
+                    set(ngfw.keys()),
+                    {
+                        "enable_hierarchical_firewall_policy",
+                        "enable_ngfw_standard_rules",
+                        "enable_secure_tags",
+                        "enable_ngfw_enterprise",
+                    },
+                )
+                for nkey in ngfw:
+                    self.assertIsInstance(ngfw[nkey], bool)
+
+                scc = payload["scc"]
+                self.assertEqual(
+                    set(scc.keys()),
+                    {
+                        "scc_tier",
+                        "scc_scope",
+                        "enable_audit_cmek",
+                        "scc_alert_email_addresses",
+                        "runtime_detectors",
+                    },
+                )
+                self.assertIn(scc["scc_tier"], ("NONE", "STANDARD", "PREMIUM"))
+                self.assertIn(scc["scc_scope"], ("FOLDER", "PROJECT"))
+                self.assertIsInstance(scc["enable_audit_cmek"], bool)
+                self.assertIsInstance(scc["scc_alert_email_addresses"], list)
+                self.assertIsInstance(scc["runtime_detectors"], list)
+                allowed_detectors = {
+                    "EVENT_THREAT_DETECTION",
+                    "CONTAINER_THREAT_DETECTION",
+                    "VIRTUAL_MACHINE_THREAT_DETECTION",
+                    "CLOUD_RUN_THREAT_DETECTION",
+                }
+                self.assertTrue(set(scc["runtime_detectors"]).issubset(allowed_detectors))
 
         gf = json.loads(
             (REPO_ROOT / "examples" / "platform-context.greenfield.json").read_text(
@@ -342,11 +506,13 @@ class LaunchpadIntegrityTest(unittest.TestCase):
         )
         self.assertEqual(gf["compliance_profile"], "regulated_fsi_rmit")
         self.assertTrue(gf["finops"]["create_dedicated_finops_project"])
-        self.assertEqual(gf["backup_dr"]["vault_enforced_retention_days"], 30)
+        self.assertEqual(gf["backup_dr"]["backup_enforced_retention_days"], 30)
         self.assertFalse(gf["backup_dr"]["lock_backup_vault"])
-        self.assertEqual(gf["backup_dr"]["gcs_soft_delete_days"], 30)
+        self.assertEqual(gf["backup_dr"]["soft_delete_retention_seconds"], 2592000)
+        self.assertTrue(gf["backup_dr"]["enable_dual_region_gcs"])
         self.assertTrue(gf["ngfw"]["enable_ngfw_enterprise"])
-        self.assertEqual(gf["scc"]["tier"], "PREMIUM")
+        self.assertEqual(gf["scc"]["scc_tier"], "PREMIUM")
+        self.assertIn("VIRTUAL_MACHINE_THREAT_DETECTION", gf["scc"]["runtime_detectors"])
 
         bf = json.loads(
             (REPO_ROOT / "examples" / "platform-context.brownfield.json").read_text(
@@ -355,13 +521,15 @@ class LaunchpadIntegrityTest(unittest.TestCase):
         )
         self.assertEqual(bf["compliance_profile"], "enterprise_standard")
         self.assertTrue(bf["finops"]["create_dedicated_finops_project"])
-        self.assertEqual(bf["backup_dr"]["vault_enforced_retention_days"], 14)
+        self.assertEqual(bf["backup_dr"]["backup_enforced_retention_days"], 14)
         self.assertFalse(bf["backup_dr"]["lock_backup_vault"])
-        self.assertEqual(bf["backup_dr"]["gcs_soft_delete_days"], 14)
+        self.assertEqual(bf["backup_dr"]["soft_delete_retention_seconds"], 1209600)
+        self.assertFalse(bf["backup_dr"]["enable_dual_region_gcs"])
         self.assertFalse(bf["ngfw"]["enable_ngfw_enterprise"])
-        self.assertEqual(bf["scc"]["tier"], "STANDARD")
-        for key in ("finops_project_id", "backup_project_id", "backup_vault_id"):
+        self.assertEqual(bf["scc"]["scc_tier"], "STANDARD")
+        for key in ("finops_project_id", "backup_project_id", "backup_vault_id", "by_environment"):
             self.assertIn(key, bf["existing_landing_zone"])
+        self.assertEqual(set(bf["existing_landing_zone"]["by_environment"].keys()), {"dev", "staging", "prod"})
 
     def test_questionnaire_four_pillars_and_official_links(self) -> None:
         questionnaire = (REPO_ROOT / "QUESTIONNAIRE.md").read_text(encoding="utf-8")
@@ -371,10 +539,11 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "### Pillar 3: Cloud NGFW & Network Security",
             "### Pillar 4: Security Command Center (SCC)",
             "<prefix>-cmn-finops",
-            "billing_export_location",
+            "finops_billing_export_location",
             "enable_backup_dr",
             "lock_backup_vault",
             "soft_delete_policy",
+            "soft_delete_retention_seconds",
             "ASYNC_TURBO",
             "BNM RMiT",
             "ALTER SCHEMA ... ADD REPLICA",
@@ -383,7 +552,9 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "SCC Enterprise",
             "May 21, 2027",
             "scc_scope",
+            "VIRTUAL_MACHINE_THREAT_DETECTION",
             "<prefix>_scc_findings",
+            "^[a-z][a-z0-9-]{1,6}[a-z0-9]$",
             "https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-setup",
             "https://docs.cloud.google.com/docs/migration/plan/landing-zones",
             "https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery",
@@ -509,13 +680,13 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             self.assertEqual(linked["core_storage_project_id"], "acme-dev01-data-core")
             self.assertEqual(linked["etl_compute_project_id"], "acme-dev01-data-etl")
             self.assertEqual(linked["primary_gold_project_id"], "acme-dev01-data-gold")
-            self.assertEqual(linked["bi_compute_project_id"], "acme-dev01-data-bi")
-            self.assertEqual(linked["finops_project_id"], "acme-dev01-cmn-finops")
-            self.assertEqual(linked["backup_project_id"], "acme-dev01-cmn-backup")
-            self.assertEqual(
-                linked["backup_vault_id"],
-                "projects/acme-dev01-cmn-backup/locations/asia-southeast1/backupVaults/acme-vault-01",
-            )
+            self.assertEqual(linked["bi_project_id"], "acme-dev01-data-bi")
+            self.assertNotIn("bi_compute_project_id", linked)
+            self.assertNotIn("finops_project_id", linked)
+            self.assertNotIn("backup_project_id", linked)
+            self.assertNotIn("backup_vault_id", linked)
+            self.assertEqual(linked["dataform_release_config_name"], "dev-main")
+            self.assertEqual(linked["dataform_release_config_id"], "dev-main")
             self.assertEqual(linked["primary_gold_dataset_id"], "gold")
             self.assertEqual(linked["kms_key_name"], linked["kms_key_id"])
             self.assertEqual(linked["network_id"], linked["vpc_id"])
@@ -523,6 +694,144 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 linked["dataform_service_account_email"],
                 linked["dataform_sa_email"],
             )
+
+            # Verify unfiltered keys match gcp-data-ingestion/stages/enterprise/variables.tf when present on disk.
+            committed_expected_keys = {
+                "core_project_id",
+                "core_storage_project_id",
+                "compute_project_id",
+                "etl_compute_project_id",
+                "analytics_project_id",
+                "primary_gold_project_id",
+                "bi_project_id",
+                "governance_project_id",
+                "bronze_dataset_id",
+                "silver_dataset_id",
+                "gold_dataset_id",
+                "primary_gold_dataset_id",
+                "quarantine_dataset_id",
+                "assertions_dataset_id",
+                "ops_telemetry_dataset_id",
+                "landing_bucket_name",
+                "dataform_repository_name",
+                "dataform_release_config_name",
+                "dataform_release_config_id",
+                "dataform_sa_email",
+                "dataform_service_account_email",
+                "batch_loader_sa_email",
+                "pubsub_writer_sa_email",
+                "kms_key_id",
+                "kms_key_name",
+                "pii_restricted_policy_tag_id",
+                "pii_masked_policy_tag_id",
+                "vpc_id",
+                "network_id",
+                "subnet_id",
+                "artifact_registry_repository_uri",
+                "region",
+                "environment",
+                "prefix",
+            }
+            self.assertEqual(set(linked.keys()), committed_expected_keys)
+
+            ingestion_vars_tf = (
+                REPO_ROOT.parent / "gcp-data-ingestion" / "stages" / "enterprise" / "variables.tf"
+            )
+            if ingestion_vars_tf.is_file():
+                declared_vars = set(
+                    re.findall(
+                        r'^\s*variable\s+"([A-Za-z0-9_]+)"\s*\{',
+                        ingestion_vars_tf.read_text(encoding="utf-8"),
+                        re.MULTILINE,
+                    )
+                )
+                self.assertTrue(
+                    set(linked.keys()).issubset(declared_vars),
+                    f"Undeclared keys for gcp-data-ingestion: {sorted(set(linked.keys()) - declared_vars)}",
+                )
+
+            # Verify --env staging and --env prod resolution from by_environment.
+            for target_env, expected_suffix in (("staging", "stg01"), ("prod", "prd01")):
+                env_out = tmp_root / f"{target_env}.auto.tfvars.json"
+                env_res = subprocess.run(
+                    [
+                        sys.executable,
+                        str(script),
+                        "--context",
+                        str(brownfield_ctx),
+                        "--env",
+                        target_env,
+                        "--output",
+                        str(env_out),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(env_res.returncode, 0, env_res.stderr)
+                env_linked = json.loads(env_out.read_text(encoding="utf-8"))
+                self.assertEqual(env_linked["environment"], target_env)
+                self.assertEqual(env_linked["core_project_id"], f"acme-{expected_suffix}-data-core")
+                self.assertEqual(env_linked["dataform_release_config_id"], f"{target_env}-main")
+
+            # Verify RHS alias normalization works and unknown/conflicting keys fail closed.
+            alias_ctx = tmp_root / "alias-context.json"
+            alias_payload = json.loads(brownfield_ctx.read_text(encoding="utf-8"))
+            alias_payload["existing_landing_zone"] = {
+                "core_storage_project_id": "acme-dev01-data-core",
+                "etl_compute_project_id": "acme-dev01-data-etl",
+                "bronze_dataset_id": "bronze",
+                "landing_bucket_name": "acme-dev01-raw-landing",
+                "dataform_repository_name": "medallion-repo",
+            }
+            alias_ctx.write_text(json.dumps(alias_payload), encoding="utf-8")
+            alias_out = tmp_root / "alias.auto.tfvars.json"
+            alias_res = subprocess.run(
+                [sys.executable, str(script), "--context", str(alias_ctx), "--output", str(alias_out)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(alias_res.returncode, 0, alias_res.stderr)
+            self.assertEqual(
+                json.loads(alias_out.read_text(encoding="utf-8"))["core_project_id"],
+                "acme-dev01-data-core",
+            )
+
+            unknown_ctx = tmp_root / "unknown-key-context.json"
+            unknown_payload = json.loads(brownfield_ctx.read_text(encoding="utf-8"))
+            unknown_payload["existing_landing_zone"]["unexpected_typo_key"] = "oops"
+            unknown_ctx.write_text(json.dumps(unknown_payload), encoding="utf-8")
+            unknown_res = subprocess.run(
+                [sys.executable, str(script), "--context", str(unknown_ctx), "--output", str(out_file)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(unknown_res.returncode, 0)
+            self.assertIn("ERROR:", unknown_res.stderr)
+
+            unknown_env_ctx = tmp_root / "unknown-env-key-context.json"
+            unknown_env_payload = json.loads(brownfield_ctx.read_text(encoding="utf-8"))
+            unknown_env_payload["existing_landing_zone"]["by_environment"]["prod"]["bad_key"] = "x"
+            unknown_env_ctx.write_text(json.dumps(unknown_env_payload), encoding="utf-8")
+            unknown_env_res = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--context",
+                    str(unknown_env_ctx),
+                    "--env",
+                    "dev",
+                    "--output",
+                    str(out_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(unknown_env_res.returncode, 0)
+            self.assertIn("ERROR:", unknown_env_res.stderr)
 
             # Verify optional Dataform, Dataplex, and Datastream fields pass validation and filter cleanly.
             ext_out = tmp_root / "extended.auto.tfvars.json"
@@ -575,20 +884,72 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 },
             )
 
+            # Verify full Dataform releaseConfig and Dataplex dataScans resource paths are accepted.
+            full_path_out = tmp_root / "full-paths.auto.tfvars.json"
+            full_rc = "projects/acme-dev01-data-etl/locations/asia-southeast1/repositories/medallion-repo/releaseConfigs/prod-main"
+            full_prof = "projects/acme-dev01-data-gold/locations/asia-southeast1/dataScans/silver-orders-profile"
+            full_qual = "projects/acme-dev01-data-gold/locations/asia-southeast1/dataScans/silver-orders-dq"
+            full_res = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--context",
+                    str(brownfield_ctx),
+                    "--dataform-release-config-name",
+                    full_rc,
+                    "--dataplex-profile-scan-id",
+                    full_prof,
+                    "--dataplex-quality-scan-id",
+                    full_qual,
+                    "--output",
+                    str(full_path_out),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(full_res.returncode, 0, full_res.stderr)
+            full_linked = json.loads(full_path_out.read_text(encoding="utf-8"))
+            self.assertEqual(full_linked["dataform_release_config_name"], full_rc)
+            self.assertEqual(full_linked["dataform_release_config_id"], full_rc)
+            self.assertEqual(full_linked["dataplex_profile_scan_id"], full_prof)
+            self.assertEqual(full_linked["dataplex_quality_scan_id"], full_qual)
+
+            # Verify conflicting LHS/RHS alias keys fail closed.
+            conflict_ctx = tmp_root / "conflict-alias.json"
+            conflict_payload = json.loads(brownfield_ctx.read_text(encoding="utf-8"))
+            conflict_payload["existing_landing_zone"]["core_storage_project_id"] = "acme-other-core"
+            conflict_ctx.write_text(json.dumps(conflict_payload), encoding="utf-8")
+            conflict_res = subprocess.run(
+                [sys.executable, str(script), "--context", str(conflict_ctx), "--output", str(out_file)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(conflict_res.returncode, 0)
+            self.assertIn("Conflicting values", conflict_res.stderr)
+
             # Verify invalid identifiers, non-numeric policy tags, metacharacters, and missing fields fail cleanly.
             for bad_args in (
                 ["--core-project-id", "BAD_PROJECT"],
+                ["--bronze-dataset-id", "1bad_dataset"],
                 ["--kms-key-id", "not/a/kms/key"],
                 ["--kms-key-id", 'projects/acme-dev01-gov/locations/asia-southeast1/keyRings/ring"/cryptoKeys/key'],
                 ["--vpc-id", "invalid-vpc"],
                 ["--vpc-id", "projects/acme-dev01-net/global/networks/vpc;rm"],
                 ["--subnet-id", "projects/acme-dev01-net/regions/asia-southeast1/subnetworks/sub$x"],
                 ["--dataform-repository-name", "projects/acme-dev01-etl/locations/asia-southeast1/repositories/repo'x"],
+                ["--dataform-repository-name", "projects/acme-dev01-etl/locations/asia-southeast1/repositories/repo.dot"],
+                ["--context", str(brownfield_ctx), "--dataform-release-config-name", "projects/acme-dev01-etl/locations/asia-southeast1/repositories/medallion-repo/bad/prod"],
+                ["--context", str(brownfield_ctx), "--dataplex-profile-scan-id", "BAD_SCAN"],
+                ["--context", str(brownfield_ctx), "--dataplex-quality-scan-id", "BAD_SCAN"],
+                ["--context", str(brownfield_ctx), "--env", "qa"],
                 ["--pii-restricted-policy-tag-id", "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/example-tax-id/policyTags/12345678"],
                 ["--pii-masked-policy-tag-id", "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/1000000001/policyTags/non-numeric"],
                 ["--datastream-network-attachment-id", "projects/bad/global/networkAttachments/ds"],
                 ["--prefix", "a-"],
                 ["--prefix", "a"],
+                ["--prefix", "ab"],
                 ["--prefix", "toolongprefix"],
                 ["--context", str(REPO_ROOT / "examples" / "platform-context.greenfield.json")],
             ):
@@ -748,7 +1109,11 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "roles/billing.viewer",
             "roles/backupdr.viewer",
             "roles/compute.networkViewer",
-            "roles/securitycenter.findingsViewer",
+            "roles/compute.orgFirewallPolicyUser",
+            "roles/resourcemanager.tagViewer",
+            "roles/monitoring.viewer",
+            "roles/securitycenter.adminViewer",
+            "Cloud Billing Account",
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, scanner_doc)
@@ -758,8 +1123,10 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             encoding="utf-8"
         )
         for expected in (
+            "foundation/01-org-governance foundation/02-security-network",
             "foundation/02-security-network data/enterprise/01-platform data/enterprise/02-governance-ops",
             "--from-gcs gs://<iac-outputs-bucket>/foundation-outputs.json",
+            "--env dev",
             "stages/enterprise",
             "GCP_WIF_PROVIDER",
             "GCP_WIF_SERVICE_ACCOUNT",
@@ -776,20 +1143,44 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             ci_text = wf_path.read_text(encoding="utf-8")
             with self.subTest(workflow=wf_path.name):
                 self.assertRegex(ci_text, r"(?m)^permissions:\s*\n\s*contents:\s*read\s*$")
+                self.assertNotIn("write-all", ci_text)
                 uses_refs = re.findall(r"(?m)^\s*uses:\s*([^\s#]+)", ci_text)
                 self.assertGreaterEqual(len(uses_refs), 2)
                 for ref in uses_refs:
                     with self.subTest(action_ref=ref):
                         self.assertRegex(ref, r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$")
 
+                in_perms_block = False
+                perms_indent = 0
                 in_run_block = False
                 run_indent = 0
                 for line in ci_text.splitlines():
                     stripped = line.lstrip()
                     indent = len(line) - len(stripped)
-                    if re.match(r"^(?:-\s*)?run:\s*", stripped):
+                    if in_perms_block:
+                        if stripped and indent <= perms_indent:
+                            in_perms_block = False
+                        elif stripped and not stripped.startswith("#"):
+                            self.assertNotRegex(
+                                stripped,
+                                r":\s*write\b",
+                                f"{wf_path.name}: Unapproved write permission in permissions: {stripped}",
+                            )
+                    if re.match(r"^permissions\s*:", stripped):
+                        self.assertNotRegex(
+                            stripped,
+                            r":\s*(?:write-all|write)\b",
+                            f"{wf_path.name}: Write scope on permissions line: {stripped}",
+                        )
+                        in_perms_block = True
+                        perms_indent = indent
+                        continue
+
+                    run_match = re.match(r"^(?:-\s*)?run\s*:\s*(.*)$", stripped)
+                    if run_match:
                         self.assertNotIn("${{", stripped, f"{wf_path.name}: Expression interpolation inside run:")
-                        if stripped.rstrip().endswith(("|", ">", "|-", ">-")):
+                        run_rhs = re.sub(r"\s+#.*$", "", run_match.group(1)).strip()
+                        if run_rhs in ("|", ">", "|-", ">-", "|+", ">+"):
                             in_run_block = True
                             run_indent = indent
                         continue
@@ -864,7 +1255,9 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             if path.suffix != ".md":
                 continue
             rel = str(path.relative_to(REPO_ROOT))
-            sentences = _extract_markdown_sentences(path.read_text(encoding="utf-8"))
+            content = path.read_text(encoding="utf-8")
+            sentences = _extract_markdown_sentences(content)
+            table_cells = _extract_markdown_table_cells(content)
             with self.subTest(markdown=rel):
                 for sentence in sentences:
                     words = [w for w in sentence.split() if w]
@@ -873,13 +1266,20 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                         20,
                         f"Sentence exceeds 20 words ({len(words)}) in {rel}: {sentence}",
                     )
+                for cell in table_cells:
+                    words = [w for w in cell.split() if w]
+                    self.assertLessEqual(
+                        len(words),
+                        20,
+                        f"Table cell exceeds 20 words ({len(words)}) in {rel}: {cell}",
+                    )
 
     def test_visual_assets_have_valid_headers(self) -> None:
         webp_path = REPO_ROOT / "assets" / "cloud-city-launchpad.webp"
         gif_path = REPO_ROOT / "assets" / "cloud-city-launchpad.gif"
         png_path = REPO_ROOT / "assets" / "cloud-city-org-scanner.png"
 
-        for asset_path in (webp_path, gif_path, png_path):
+        for asset_path in (webp_path, png_path):
             with self.subTest(asset=str(asset_path.relative_to(REPO_ROOT))):
                 self.assertTrue(asset_path.is_file(), f"Missing {asset_path}")
                 self.assertGreater(asset_path.stat().st_size, 100_000)
@@ -888,8 +1288,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
         self.assertEqual(webp_head[:4], b"RIFF")
         self.assertEqual(webp_head[8:12], b"WEBP")
 
-        gif_head = gif_path.read_bytes()[:6]
-        self.assertEqual(gif_head, b"GIF89a")
+        self.assertFalse(gif_path.exists(), f"Duplicate GIF asset must not exist: {gif_path}")
 
         png_head = png_path.read_bytes()[:8]
         self.assertEqual(png_head, b"\x89PNG\r\n\x1a\n")

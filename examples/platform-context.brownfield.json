@@ -19,65 +19,60 @@
   "ci_identity_mode": "github_oidc_wif",
   "finops": {
     "create_dedicated_finops_project": true,
-    "billing_export_location": "US",
-    "billing_export_dataset": "billing_export",
-    "budget_thresholds_actual_pct": [
-      50,
-      80,
-      90,
-      100
-    ],
-    "budget_thresholds_forecasted_pct": [
-      100
-    ],
-    "budgets": {
-      "master": 5000,
+    "finops_billing_export_location": "US",
+    "monthly_budget_amount": 5000,
+    "environment_budgets": {
       "dev": 500,
       "staging": 1500,
-      "prod": 3000,
-      "workloads": {
-        "data-platform": 2500
+      "prod": 3000
+    },
+    "workload_budgets": {
+      "data-platform": {
+        "amount": 2500,
+        "projects": [],
+        "labels": {
+          "workload": "data"
+        },
+        "alert_emails": [
+          "data-platform-owners@example.com"
+        ]
       }
     },
-    "alert_groups": [
-      "gcp-finops-alerts@example.com",
-      "gcp-billing-admins@example.com",
-      "data-platform-owners@example.com"
+    "budget_thresholds": [
+      0.5,
+      0.8,
+      0.9,
+      1.0
     ],
-    "enable_pubsub_alerts": true
+    "enable_forecasted_threshold": true,
+    "finops_alert_email_addresses": [
+      "gcp-finops-alerts@example.com",
+      "gcp-billing-admins@example.com"
+    ]
   },
   "backup_dr": {
     "enable_backup_dr": true,
-    "vault_enforced_retention_days": 14,
+    "backup_enforced_retention_days": 14,
     "lock_backup_vault": false,
-    "gcs_soft_delete_days": 14,
-    "gcs_dual_region_rpo": "DEFAULT",
+    "soft_delete_retention_seconds": 1209600,
+    "enable_dual_region_gcs": false,
+    "gcs_rpo": "DEFAULT",
     "cross_border_dual_region_approved": false,
-    "bq_time_travel_hours": 168,
     "bq_dr_mode": "time_travel_only"
   },
   "ngfw": {
-    "enable_2_layer_policy": true,
-    "folder_hierarchical_policy": true,
-    "vpc_global_network_policy": true,
-    "tier": "NGFW_STANDARD",
-    "enable_ngfw_enterprise": false,
-    "secure_tags": {
-      "tier": [
-        "web",
-        "app",
-        "data"
-      ],
-      "access": [
-        "allow-iap"
-      ]
-    }
+    "enable_hierarchical_firewall_policy": true,
+    "enable_ngfw_standard_rules": true,
+    "enable_secure_tags": true,
+    "enable_ngfw_enterprise": false
   },
   "scc": {
-    "tier": "STANDARD",
-    "scc_scope": "folder",
-    "enable_audit_kms_cmek": true,
-    "alert_group": "gcp-secops-alerts@example.com",
+    "scc_tier": "STANDARD",
+    "scc_scope": "FOLDER",
+    "enable_audit_cmek": true,
+    "scc_alert_email_addresses": [
+      "gcp-secops-alerts@example.com"
+    ],
     "runtime_detectors": []
   },
   "existing_landing_zone": {
@@ -100,6 +95,7 @@
     "ops_telemetry_dataset_id": "ops_telemetry",
     "landing_bucket_name": "acme-dev01-raw-landing",
     "dataform_repository_name": "medallion-repo",
+    "dataform_release_config_name": "dev-main",
     "dataform_sa_email": "sa-dataform@acme-dev01-data-etl.iam.gserviceaccount.com",
     "batch_loader_sa_email": "sa-batch-loader@acme-dev01-data-etl.iam.gserviceaccount.com",
     "pubsub_writer_sa_email": "sa-pubsub-writer@acme-dev01-data-etl.iam.gserviceaccount.com",
@@ -108,6 +104,56 @@
     "pii_masked_policy_tag_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/1000000001/policyTags/2000000002",
     "vpc_id": "projects/acme-dev01-network/global/networks/acme-shared-vpc",
     "subnet_id": "projects/acme-dev01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
-    "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-dev01-data-etl/ingestion-containers"
+    "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-dev01-data-etl/ingestion-containers",
+    "by_environment": {
+      "dev": {
+        "core_project_id": "acme-dev01-data-core",
+        "compute_project_id": "acme-dev01-data-etl",
+        "analytics_project_id": "acme-dev01-data-gold",
+        "bi_project_id": "acme-dev01-data-bi",
+        "governance_project_id": "acme-dev01-data-gov",
+        "landing_bucket_name": "acme-dev01-raw-landing",
+        "dataform_release_config_name": "dev-main",
+        "dataform_sa_email": "sa-dataform@acme-dev01-data-etl.iam.gserviceaccount.com",
+        "batch_loader_sa_email": "sa-batch-loader@acme-dev01-data-etl.iam.gserviceaccount.com",
+        "pubsub_writer_sa_email": "sa-pubsub-writer@acme-dev01-data-etl.iam.gserviceaccount.com",
+        "kms_key_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/keyRings/data-ring/cryptoKeys/data-cmek",
+        "vpc_id": "projects/acme-dev01-network/global/networks/acme-shared-vpc",
+        "subnet_id": "projects/acme-dev01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
+        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-dev01-data-etl/ingestion-containers"
+      },
+      "staging": {
+        "core_project_id": "acme-stg01-data-core",
+        "compute_project_id": "acme-stg01-data-etl",
+        "analytics_project_id": "acme-stg01-data-gold",
+        "bi_project_id": "acme-stg01-data-bi",
+        "governance_project_id": "acme-stg01-data-gov",
+        "landing_bucket_name": "acme-stg01-raw-landing",
+        "dataform_release_config_name": "staging-main",
+        "dataform_sa_email": "sa-dataform@acme-stg01-data-etl.iam.gserviceaccount.com",
+        "batch_loader_sa_email": "sa-batch-loader@acme-stg01-data-etl.iam.gserviceaccount.com",
+        "pubsub_writer_sa_email": "sa-pubsub-writer@acme-stg01-data-etl.iam.gserviceaccount.com",
+        "kms_key_id": "projects/acme-stg01-data-gov/locations/asia-southeast1/keyRings/data-ring/cryptoKeys/data-cmek",
+        "vpc_id": "projects/acme-stg01-network/global/networks/acme-shared-vpc",
+        "subnet_id": "projects/acme-stg01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
+        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-stg01-data-etl/ingestion-containers"
+      },
+      "prod": {
+        "core_project_id": "acme-prd01-data-core",
+        "compute_project_id": "acme-prd01-data-etl",
+        "analytics_project_id": "acme-prd01-data-gold",
+        "bi_project_id": "acme-prd01-data-bi",
+        "governance_project_id": "acme-prd01-data-gov",
+        "landing_bucket_name": "acme-prd01-raw-landing",
+        "dataform_release_config_name": "prod-main",
+        "dataform_sa_email": "sa-dataform@acme-prd01-data-etl.iam.gserviceaccount.com",
+        "batch_loader_sa_email": "sa-batch-loader@acme-prd01-data-etl.iam.gserviceaccount.com",
+        "pubsub_writer_sa_email": "sa-pubsub-writer@acme-prd01-data-etl.iam.gserviceaccount.com",
+        "kms_key_id": "projects/acme-prd01-data-gov/locations/asia-southeast1/keyRings/data-ring/cryptoKeys/data-cmek",
+        "vpc_id": "projects/acme-prd01-network/global/networks/acme-shared-vpc",
+        "subnet_id": "projects/acme-prd01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
+        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-prd01-data-etl/ingestion-containers"
+      }
+    }
   }
 }

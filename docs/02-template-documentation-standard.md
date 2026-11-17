@@ -21,7 +21,7 @@ Every active and planned template repository in the suite must follow this stand
 | `CODEOWNERS` | Default path-based reviewer rules for infrastructure, schemas, workflows, and docs |
 | `LICENSE` | Apache License 2.0 text |
 | `Makefile` | Standard `make test` and preflight/validation entry points |
-| `.gitignore` | Blocks `platform-context.json`, `*.tfvars`, `*.tfvars.json`, and `*.tfstate*` |
+| `.gitignore` | Blocks `platform-context.json`, `terraform.tfvars`, `*.auto.tfvars`, `*.auto.tfvars.json`, and `*.tfstate*` |
 | `.agents/skills/` | Task-specific agent skills with valid `SKILL.md` YAML frontmatter |
 | `docs/` | Architecture guides, decision records, and 6-step Day-0/1/2 operational playbooks |
 | `tests/` | Hermetic unit test suite verifying structure, schemas, workflows, and prose hygiene |

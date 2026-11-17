@@ -1,6 +1,7 @@
 platform-context.json
-*.tfvars
-*.tfvars.json
+terraform.tfvars
+*.auto.tfvars
+*.auto.tfvars.json
 .cm_project
 .codemender/
 __pycache__/

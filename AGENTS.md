@@ -12,6 +12,7 @@ Never create `GEMINI.md` or `catalog.yaml`.
 - Planned templates: `gcp-webapp`, `gcp-adk-agent`.
 - Operational playbook: [docs/01-end-to-end-operational-playbook.md](docs/01-end-to-end-operational-playbook.md).
 - Documentation standard: [docs/02-template-documentation-standard.md](docs/02-template-documentation-standard.md).
+- Org scanner design: [docs/03-org-completeness-scanner-design.md](docs/03-org-completeness-scanner-design.md).
 
 ## Routing & Bridge Workflow
 
@@ -24,7 +25,7 @@ Never create `GEMINI.md` or `catalog.yaml`.
 
 ## Security & Prose Rules
 
-- Never commit `platform-context.json`, `*.tfvars`, `*.tfvars.json`, or `*.tfstate*`.
+- Never commit `platform-context.json`, `terraform.tfvars`, `*.auto.tfvars`, `*.auto.tfvars.json`, or `*.tfstate*`.
 - Never commit real GCP project IDs, 12-digit org or folder IDs, billing IDs, or personal LDAPs.
 - Use `<YOUR_ORG_ID>`, `<YOUR_FOLDER_ID>`, `<YOUR_BILLING_ACCOUNT_ID>`, and `example-org` in docs and examples.
 - Follow [docs/02-template-documentation-standard.md](docs/02-template-documentation-standard.md) for README structure, `<= 20`-word sentences, and CI hardening.
