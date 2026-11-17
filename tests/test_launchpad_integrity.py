@@ -1,5 +1,6 @@
 """Verify gcp-launchpad structure, scripts, schemas, workflows, and prose hygiene."""
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -580,13 +581,23 @@ class LaunchpadIntegrityTest(unittest.TestCase):
         self.assertIn("Usage:", help_res.stdout)
 
         dry_res = subprocess.run(
-            ["bash", str(script), "--dry-run", "--project", "example-core-01"],
+            ["bash", str(script), "--dry-run", "--project", "example-core-01", "--region", "asia-southeast1"],
             capture_output=True,
             text=True,
             check=False,
         )
         self.assertEqual(dry_res.returncode, 0, dry_res.stderr)
         self.assertIn("Dry-run mode enabled", dry_res.stdout)
+        self.assertIn("gcloud compute regions describe asia-southeast1 --project=example-core-01", dry_res.stdout)
+
+        dry_region_only = subprocess.run(
+            ["bash", str(script), "--dry-run", "--region", "asia-southeast1"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(dry_region_only.returncode, 0, dry_region_only.stderr)
+        self.assertIn("Planned check: gcloud compute regions", dry_region_only.stdout)
 
         for bad_args in (
             ["--dry-run", "--project", "BAD_ID!"],
@@ -609,6 +620,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             ["--dry-run", "--region", ""],
             ["--dry-run", "--project"],
             ["--project", "--dry-run"],
+            ["--project", "-h"],
             ["--dry-run", "--project="],
             ["--dry-run", "--org-id="],
             ["--dry-run", "--region="],
@@ -645,6 +657,71 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             )
             self.assertEqual(unset_res.returncode, 1)
             self.assertIn("No active gcloud account", unset_res.stderr)
+
+            # Verify ACTIVE vs DELETE_REQUESTED lifecycleState and region checks with mocked gcloud.
+            gcloud_mock = bin_dir / "gcloud"
+            gcloud_mock.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os, sys\n"
+                "args = sys.argv[1:]\n"
+                "if args[:3] == ['config', 'get-value', 'account']:\n"
+                "    print('admin@example.com')\n"
+                "elif args[:2] == ['projects', 'describe']:\n"
+                "    print(os.environ.get('MOCK_PROJECT_STATE', 'ACTIVE'))\n"
+                "elif args[:3] == ['resource-manager', 'folders', 'describe']:\n"
+                "    print(os.environ.get('MOCK_FOLDER_STATE', 'ACTIVE'))\n"
+                "elif args[:3] == ['compute', 'regions', 'describe']:\n"
+                "    print('asia-southeast1\\tUP')\n"
+                "elif args[:3] == ['compute', 'regions', 'list']:\n"
+                "    print('asia-southeast1\\tUP')\n",
+                encoding="utf-8",
+            )
+            gcloud_mock.chmod(0o755)
+
+            ok_live = subprocess.run(
+                [
+                    "bash",
+                    str(script),
+                    "--project",
+                    "example-core-01",
+                    "--folder",
+                    "12345678",
+                    "--region",
+                    "asia-southeast1",
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(ok_live.returncode, 0, ok_live.stderr)
+            self.assertIn("Preflight checks passed", ok_live.stdout)
+
+            del_proj_env = env.copy()
+            del_proj_env["MOCK_PROJECT_STATE"] = "DELETE_REQUESTED"
+            del_proj = subprocess.run(
+                ["bash", str(script), "--project", "example-core-01"],
+                env=del_proj_env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(del_proj.returncode, 1)
+            self.assertIn("ERROR:", del_proj.stderr)
+            self.assertIn("DELETE_REQUESTED", del_proj.stderr)
+
+            del_folder_env = env.copy()
+            del_folder_env["MOCK_FOLDER_STATE"] = "DELETE_REQUESTED"
+            del_folder = subprocess.run(
+                ["bash", str(script), "--folder", "12345678"],
+                env=del_folder_env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(del_folder.returncode, 1)
+            self.assertIn("ERROR:", del_folder.stderr)
+            self.assertIn("DELETE_REQUESTED", del_folder.stderr)
 
     def test_generate_brownfield_link_end_to_end_and_filtering(self) -> None:
         script = REPO_ROOT / "scripts" / "generate-brownfield-link.py"
@@ -734,6 +811,27 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             }
             self.assertEqual(set(linked.keys()), committed_expected_keys)
 
+            spec = importlib.util.spec_from_file_location("generate_brownfield_link", script)
+            self.assertIsNotNone(spec)
+            assert spec is not None and spec.loader is not None
+            gbl = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(gbl)
+
+            # Hermetic check of INGESTION_DECLARED_VARS against FIELD_FLAGS, REQUIRED_FIELDS, and ALIAS_PAIRS.
+            foundation_only_fields = frozenset(
+                {"finops_project_id", "backup_project_id", "backup_vault_id"}
+            )
+            self.assertEqual(len(gbl.INGESTION_DECLARED_VARS), 75)
+            self.assertTrue(set(gbl.REQUIRED_FIELDS).issubset(gbl.INGESTION_DECLARED_VARS))
+            self.assertTrue(
+                (set(gbl.FIELD_FLAGS) - foundation_only_fields).issubset(
+                    gbl.INGESTION_DECLARED_VARS
+                )
+            )
+            for primary, alias in gbl.ALIAS_PAIRS:
+                self.assertIn(primary, gbl.INGESTION_DECLARED_VARS)
+                self.assertIn(alias, gbl.INGESTION_DECLARED_VARS)
+
             ingestion_vars_tf = (
                 REPO_ROOT.parent / "gcp-data-ingestion" / "stages" / "enterprise" / "variables.tf"
             )
@@ -745,34 +843,166 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                         re.MULTILINE,
                     )
                 )
+                self.assertEqual(gbl.INGESTION_DECLARED_VARS, declared_vars)
                 self.assertTrue(
                     set(linked.keys()).issubset(declared_vars),
                     f"Undeclared keys for gcp-data-ingestion: {sorted(set(linked.keys()) - declared_vars)}",
                 )
 
-            # Verify --env staging and --env prod resolution from by_environment.
-            for target_env, expected_suffix in (("staging", "stg01"), ("prod", "prd01")):
-                env_out = tmp_root / f"{target_env}.auto.tfvars.json"
-                env_res = subprocess.run(
-                    [
-                        sys.executable,
-                        str(script),
-                        "--context",
-                        str(brownfield_ctx),
-                        "--env",
-                        target_env,
-                        "--output",
-                        str(env_out),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                self.assertEqual(env_res.returncode, 0, env_res.stderr)
-                env_linked = json.loads(env_out.read_text(encoding="utf-8"))
-                self.assertEqual(env_linked["environment"], target_env)
-                self.assertEqual(env_linked["core_project_id"], f"acme-{expected_suffix}-data-core")
-                self.assertEqual(env_linked["dataform_release_config_id"], f"{target_env}-main")
+            # Verify --env and --environment staging/prod resolution from by_environment with zero dev01 leaks.
+            for env_flag in ("--env", "--environment"):
+                for target_env, expected_suffix in (("staging", "stg01"), ("prod", "prd01")):
+                    with self.subTest(env_flag=env_flag, target_env=target_env):
+                        env_out = tmp_root / f"{env_flag.lstrip('-')}-{target_env}.auto.tfvars.json"
+                        env_res = subprocess.run(
+                            [
+                                sys.executable,
+                                str(script),
+                                "--context",
+                                str(brownfield_ctx),
+                                env_flag,
+                                target_env,
+                                "--output",
+                                str(env_out),
+                            ],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                        self.assertEqual(env_res.returncode, 0, env_res.stderr)
+                        raw_env_text = env_out.read_text(encoding="utf-8")
+                        self.assertNotIn("dev01", raw_env_text)
+                        env_linked = json.loads(raw_env_text)
+                        self.assertEqual(env_linked["environment"], target_env)
+                        self.assertEqual(
+                            env_linked["core_project_id"],
+                            f"acme-{expected_suffix}-data-core",
+                        )
+                        self.assertEqual(
+                            env_linked["dataform_release_config_id"],
+                            f"{target_env}-main",
+                        )
+                        self.assertIn(
+                            f"acme-{expected_suffix}-data-gov",
+                            env_linked["pii_restricted_policy_tag_id"],
+                        )
+                        self.assertIn(
+                            f"acme-{expected_suffix}-data-gov",
+                            env_linked["pii_masked_policy_tag_id"],
+                        )
+
+            # Verify conflicting --env/--environment and empty --env/--environment fail closed.
+            for bad_env_args, expected_err in (
+                (["--context", str(brownfield_ctx), "--env", "dev", "--environment", "staging"], "Conflicting"),
+                (["--context", str(brownfield_ctx), "--env", ""], "Invalid environment ''"),
+                (["--context", str(brownfield_ctx), "--environment", ""], "Invalid environment ''"),
+            ):
+                with self.subTest(bad_env_args=bad_env_args):
+                    bad_env_res = subprocess.run(
+                        [sys.executable, str(script), *bad_env_args, "--output", str(out_file)],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(bad_env_res.returncode, 0)
+                    self.assertIn(expected_err, bad_env_res.stderr)
+
+            # Verify by_environment empty string or null unsets inherited base keys.
+            for unset_val in ("", None):
+                with self.subTest(unset_val=unset_val):
+                    unset_ctx = tmp_root / f"unset-{'none' if unset_val is None else 'empty'}.json"
+                    unset_payload = json.loads(brownfield_ctx.read_text(encoding="utf-8"))
+                    unset_payload["existing_landing_zone"]["by_environment"]["dev"]["kms_key_id"] = unset_val
+                    unset_ctx.write_text(json.dumps(unset_payload), encoding="utf-8")
+                    unset_out = tmp_root / "unset.auto.tfvars.json"
+                    unset_res = subprocess.run(
+                        [
+                            sys.executable,
+                            str(script),
+                            "--context",
+                            str(unset_ctx),
+                            "--env",
+                            "dev",
+                            "--output",
+                            str(unset_out),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(unset_res.returncode, 0, unset_res.stderr)
+                    unset_linked = json.loads(unset_out.read_text(encoding="utf-8"))
+                    self.assertNotIn("kms_key_id", unset_linked)
+                    self.assertNotIn("kms_key_name", unset_linked)
+
+            # Verify RHS CLI alias flags normalize to LHS and conflicting LHS/RHS CLI flags fail closed.
+            cli_alias_out = tmp_root / "cli-alias.auto.tfvars.json"
+            cli_alias_res = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--core-storage-project-id",
+                    "acme-dev01-data-core",
+                    "--etl-compute-project-id",
+                    "acme-dev01-data-etl",
+                    "--primary-gold-project-id",
+                    "acme-dev01-data-gold",
+                    "--bronze-dataset-id",
+                    "bronze",
+                    "--primary-gold-dataset-id",
+                    "gold",
+                    "--landing-bucket-name",
+                    "acme-dev01-raw-landing",
+                    "--dataform-repository-name",
+                    "medallion-repo",
+                    "--dataform-release-config-id",
+                    "dev-main",
+                    "--dataform-service-account-email",
+                    "sa-df@acme-dev01-data-etl.iam.gserviceaccount.com",
+                    "--kms-key-name",
+                    "projects/acme-dev01-data-gov/locations/asia-southeast1/keyRings/r/cryptoKeys/k",
+                    "--network-id",
+                    "projects/acme-dev01-network/global/networks/acme-vpc",
+                    "--output",
+                    str(cli_alias_out),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(cli_alias_res.returncode, 0, cli_alias_res.stderr)
+            cli_alias_linked = json.loads(cli_alias_out.read_text(encoding="utf-8"))
+            self.assertEqual(cli_alias_linked["core_project_id"], "acme-dev01-data-core")
+            self.assertEqual(cli_alias_linked["compute_project_id"], "acme-dev01-data-etl")
+            self.assertEqual(cli_alias_linked["analytics_project_id"], "acme-dev01-data-gold")
+            self.assertEqual(cli_alias_linked["gold_dataset_id"], "gold")
+            self.assertEqual(cli_alias_linked["dataform_release_config_name"], "dev-main")
+            self.assertEqual(
+                cli_alias_linked["dataform_sa_email"],
+                "sa-df@acme-dev01-data-etl.iam.gserviceaccount.com",
+            )
+            self.assertIn("kms_key_id", cli_alias_linked)
+            self.assertIn("vpc_id", cli_alias_linked)
+
+            cli_conflict_res = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--context",
+                    str(brownfield_ctx),
+                    "--core-project-id",
+                    "acme-dev01-data-core",
+                    "--core-storage-project-id",
+                    "acme-other-data-core",
+                    "--output",
+                    str(out_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(cli_conflict_res.returncode, 0)
+            self.assertIn("Conflicting CLI flags", cli_conflict_res.stderr)
 
             # Verify RHS alias normalization works and unknown/conflicting keys fail closed.
             alias_ctx = tmp_root / "alias-context.json"
@@ -1108,8 +1338,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "<prefix>_scc_findings",
             "roles/billing.viewer",
             "roles/backupdr.viewer",
-            "roles/compute.networkViewer",
-            "roles/compute.orgFirewallPolicyUser",
+            "roles/compute.viewer",
             "roles/resourcemanager.tagViewer",
             "roles/monitoring.viewer",
             "roles/securitycenter.adminViewer",
@@ -1117,6 +1346,8 @@ class LaunchpadIntegrityTest(unittest.TestCase):
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, scanner_doc)
+        self.assertNotIn("roles/compute.networkViewer", scanner_doc)
+        self.assertNotIn("roles/compute.orgFirewallPolicyUser", scanner_doc)
 
     def test_playbook_contains_complete_commands_and_variables(self) -> None:
         playbook = (REPO_ROOT / "docs" / "01-end-to-end-operational-playbook.md").read_text(

@@ -211,6 +211,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     for field in FIELD_FLAGS:
         flag = "--" + field.replace("_", "-")
         parser.add_argument(flag, dest=field, default=None)
+    for _, alias in ALIAS_PAIRS:
+        flag = "--" + alias.replace("_", "-")
+        parser.add_argument(flag, dest=alias, default=None)
     parser.add_argument(
         "--target-variables-tf",
         type=Path,
@@ -257,14 +260,24 @@ def _validate_dataplex_scan(name: str, value: str) -> None:
         )
 
 
-def _normalize_landing_zone_dict(
+def _validate_environment(value: str) -> None:
+    if not ENVIRONMENT_RE.match(value):
+        raise ValueError(
+            f"Invalid environment '{value}': expected dev, staging, or prod"
+        )
+
+
+def _normalize_landing_zone_with_unsets(
     mapping: dict[object, object], context_label: str
-) -> dict[str, str]:
+) -> tuple[dict[str, str], set[str]]:
     cleaned: dict[str, str] = {}
+    unset_keys: set[str] = set()
     for key, raw_val in mapping.items():
         if not isinstance(key, str) or key not in VALID_LANDING_ZONE_KEYS:
             raise ValueError(f"Unknown key in {context_label}: {key}")
+        canonical = ALIAS_RHS_TO_LHS.get(key, key)
         if raw_val is None:
+            unset_keys.add(canonical)
             continue
         if not isinstance(raw_val, str):
             raise ValueError(
@@ -273,6 +286,8 @@ def _normalize_landing_zone_dict(
         stripped = raw_val.strip()
         if stripped:
             cleaned[key] = stripped
+        else:
+            unset_keys.add(canonical)
 
     for primary, alias in ALIAS_PAIRS:
         if primary in cleaned and alias in cleaned and cleaned[primary] != cleaned[alias]:
@@ -283,8 +298,16 @@ def _normalize_landing_zone_dict(
     normalized: dict[str, str] = {}
     for key, val in cleaned.items():
         canonical = ALIAS_RHS_TO_LHS.get(key, key)
+        unset_keys.discard(canonical)
         if canonical not in normalized:
             normalized[canonical] = val
+    return normalized, unset_keys
+
+
+def _normalize_landing_zone_dict(
+    mapping: dict[object, object], context_label: str
+) -> dict[str, str]:
+    normalized, _ = _normalize_landing_zone_with_unsets(mapping, context_label)
     return normalized
 
 
@@ -298,7 +321,7 @@ def load_context_values(
         raise ValueError("platform-context.json must contain a JSON object.")
 
     if target_env is not None:
-        _validate_pattern("env", target_env, ENVIRONMENT_RE)
+        _validate_environment(target_env)
 
     values: dict[str, str] = {}
     landing_zone = payload.get("existing_landing_zone")
@@ -316,7 +339,7 @@ def load_context_values(
                     "existing_landing_zone.by_environment must be a non-empty JSON object."
                 )
 
-            normalized_by_env: dict[str, dict[str, str]] = {}
+            normalized_by_env: dict[str, tuple[dict[str, str], set[str]]] = {}
             for env_key, env_obj in by_env.items():
                 if not isinstance(env_key, str) or not ENVIRONMENT_RE.match(env_key):
                     raise ValueError(
@@ -326,7 +349,7 @@ def load_context_values(
                     raise ValueError(
                         f"existing_landing_zone.by_environment.{env_key} must be a JSON object."
                     )
-                normalized_by_env[env_key] = _normalize_landing_zone_dict(
+                normalized_by_env[env_key] = _normalize_landing_zone_with_unsets(
                     env_obj, f"existing_landing_zone.by_environment.{env_key}"
                 )
 
@@ -348,7 +371,10 @@ def load_context_values(
                     f"Environment '{selected_env}' not found in existing_landing_zone.by_environment"
                 )
 
-            values.update(normalized_by_env[selected_env])
+            env_values, unset_keys = normalized_by_env[selected_env]
+            for unset_key in unset_keys:
+                values.pop(unset_key, None)
+            values.update(env_values)
             values["environment"] = selected_env
         elif target_env is not None:
             values["environment"] = target_env
@@ -509,14 +535,37 @@ def write_atomic_json(output_path: Path, payload: dict[str, str]) -> None:
         raise
 
 
+def _resolve_cli_environment(raw_env: str | None, raw_environment: str | None) -> str | None:
+    cleaned_env: str | None = None
+    cleaned_environment: str | None = None
+    if raw_env is not None:
+        cleaned_env = raw_env.strip()
+        _validate_environment(cleaned_env)
+    if raw_environment is not None:
+        cleaned_environment = raw_environment.strip()
+        _validate_environment(cleaned_environment)
+    if (
+        cleaned_env is not None
+        and cleaned_environment is not None
+        and cleaned_env != cleaned_environment
+    ):
+        raise ValueError("Conflicting --env and --environment values.")
+    return cleaned_env if cleaned_env is not None else cleaned_environment
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        target_env: str | None = None
-        if args.env is not None:
-            cleaned_env = args.env.strip()
-            _validate_pattern("env", cleaned_env, ENVIRONMENT_RE)
-            target_env = cleaned_env
+        target_env = _resolve_cli_environment(args.env, args.environment)
+
+        for primary, alias in ALIAS_PAIRS:
+            raw_primary = getattr(args, primary, None)
+            raw_alias = getattr(args, alias, None)
+            if raw_primary is not None and raw_alias is not None:
+                if raw_primary.strip() != raw_alias.strip():
+                    raise ValueError(
+                        f"Conflicting CLI flags for {primary} and alias {alias}."
+                    )
 
         values: dict[str, str] = {}
         if args.context is not None:
@@ -525,6 +574,8 @@ def main(argv: list[str] | None = None) -> int:
             values["environment"] = target_env
 
         for field in FIELD_FLAGS:
+            if field == "environment":
+                continue
             cli_val = getattr(args, field, None)
             if cli_val is not None:
                 cleaned = cli_val.strip()
@@ -532,6 +583,15 @@ def main(argv: list[str] | None = None) -> int:
                     values[field] = cleaned
                 else:
                     values.pop(field, None)
+
+        for primary, alias in ALIAS_PAIRS:
+            cli_val = getattr(args, alias, None)
+            if cli_val is not None:
+                cleaned = cli_val.strip()
+                if cleaned:
+                    values[primary] = cleaned
+                else:
+                    values.pop(primary, None)
 
         validate_inputs(values)
         linked = build_linked_tfvars(values, args.target_variables_tf)

@@ -84,6 +84,7 @@ Configure threat detection, finding exports, and security operations routing.
 
 - **`scc_tier`**: Choose `NONE`, `STANDARD`, or `PREMIUM`. Note that `SCC Enterprise` retires May 21, 2027.
 - **`scc_scope`**: Choose `FOLDER` activation versus `PROJECT` pay-as-you-go (`PAYG`) coverage.
+- **Organization ID (`organization_id`)**: Required for `PREMIUM` Security Posture or custom ETD modules even when `scc_scope = "FOLDER"`.
 - **Audit KMS CMEK (`enable_audit_cmek`)**: Encrypt `<prefix>_scc_findings` BigQuery exports and Pub/Sub topics using Stage-01 Audit KMS keys.
 - **Alert routing (`scc_alert_email_addresses`)**: Route high and critical SCC findings to `gcp-secops-alerts@<domain>`.
 - **Runtime detectors (`runtime_detectors`)**: Select from `EVENT_THREAT_DETECTION`, `CONTAINER_THREAT_DETECTION`, `VIRTUAL_MACHINE_THREAT_DETECTION`, and `CLOUD_RUN_THREAT_DETECTION` when running `PREMIUM`.

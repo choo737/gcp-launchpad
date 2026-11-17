@@ -46,7 +46,17 @@ Complete architecture intake and create isolated private repositories before pro
 5. Run `gh repo view --json isPrivate --jq '.isPrivate'` in every clone and confirm `true`.
 6. Update `CODEOWNERS` with customer team slugs and protect `main` with required pull request reviews.
 7. Create `dev`, `staging`, and `prod` GitHub Environments and require human reviewers on `prod`.
-8. Deploy `gcp-foundation/foundation/00-bootstrap` and configure `ci_repository_map` to scope keyless GitHub OIDC WIF per repository.
+8. Deploy `gcp-foundation/foundation/00-bootstrap` with `enable_github_wif = true`, `github_org`, and `ci_repository_map` (`tf_foundation_ci`, `tf_ingestion_ci`, `dataform_ci`).
+
+| GitHub Variable | Scope | Purpose |
+| --- | --- | --- |
+| `GCP_WIF_PROVIDER` | Repo / Environment | Keyless OIDC provider resource path |
+| `GCP_WIF_SERVICE_ACCOUNT` | Repo / Environment | Service account email impersonated via WIF |
+| `GCP_TFSTATE_BUCKET` | Repo / Environment | Remote GCS Terraform state bucket |
+| `IAC_OUTPUTS_BUCKET` | Repo / Environment | Non-sensitive `foundation-outputs.json` GCS bucket |
+| `ARTIFACT_REGISTRY_REPOSITORY` | Repo / Environment | Container registry path for `gcs_to_bronze` |
+| `PII_MASKED_POLICY_TAG` | Environment (`staging`/`prod`) | Masked PII Data Catalog policy tag |
+| `PII_RESTRICTED_POLICY_TAG` | Environment (`staging`/`prod`) | Restricted PII Data Catalog policy tag |
 
 ## Step 2 — Day 1A: Landing Zone Rollout (`gcp-foundation`) or Brownfield Bridge
 
@@ -54,19 +64,26 @@ Provision the Greenfield landing zone in `gcp-foundation`, or run the Brownfield
 
 ### Option A: Greenfield (`gcp-foundation`)
 
-1. Deploy `foundation/01-org-governance` once to apply 36 Org Policies, locked audit bucket, FinOps budgets, and SCC tier.
-2. Link outputs between `gcp-foundation` stages using `./scripts/link-stages.sh` before deploying each environment (`dev`, `staging`, `prod`).
+1. Deploy `foundation/01-org-governance` once (Org Policies, locked audit bucket, FinOps budgets, `BackupVault`, SCC tier).
+2. Link `foundation/01-org-governance` into `foundation/02-security-network`, then deploy `02-security-network` per environment (`enforce_vpc_sc = false` `DRY_RUN` first).
 
 ```bash
 ./scripts/link-stages.sh --env <env> foundation/01-org-governance foundation/02-security-network
+```
+
+3. Link upstream outputs into `data/enterprise/01-platform`, then deploy `01-platform` per environment.
+
+```bash
 ./scripts/link-stages.sh --env <env> foundation/01-org-governance foundation/02-security-network data/enterprise/01-platform
+```
+
+4. Link `data/enterprise/01-platform` into `data/enterprise/02-governance-ops`, then deploy `02-governance-ops` per environment.
+
+```bash
 ./scripts/link-stages.sh --env <env> data/enterprise/01-platform data/enterprise/02-governance-ops
 ```
 
-3. Deploy `foundation/02-security-network` per environment (`dev`, `staging`, `prod`) for Shared VPC, KMS, NGFW, `BackupVault`, and VPC-SC.
-4. Keep `enforce_vpc_sc = false` initially so VPC-SC runs in `DRY_RUN` mode while validating traffic.
-5. Deploy `data/enterprise/01-platform` and `data/enterprise/02-governance-ops` per environment (`dev`, `staging`, `prod`).
-6. Export non-sensitive stage outputs per environment to Cloud Storage with `scripts/link-stages.sh`.
+5. Export non-sensitive stage outputs per environment to Cloud Storage using `scripts/link-stages.sh`.
 
 ```bash
 ./scripts/link-stages.sh --env <env> \
@@ -74,7 +91,7 @@ Provision the Greenfield landing zone in `gcp-foundation`, or run the Brownfield
   foundation/02-security-network data/enterprise/01-platform data/enterprise/02-governance-ops
 ```
 
-7. Inspect `DRY_RUN` VPC-SC logs in Log Analytics, update ingress rules, then flip `enforce_vpc_sc = true` (`DRY_RUN -> ENFORCED`).
+6. Inspect `DRY_RUN` VPC-SC logs in Log Analytics, update ingress rules, then flip `enforce_vpc_sc = true` (`DRY_RUN -> ENFORCED`).
 
 ### Option B: Brownfield Bridge (`gcp-launchpad`)
 
@@ -105,10 +122,16 @@ Deploy streaming, CDC, and batch Bronze pipelines using linked landing zone outp
 ```
 
 2. Trigger `.github/workflows/build-batch-loader.yml` to build `jobs/gcs_to_bronze` and record its immutable `@sha256` digest.
-3. Paste that `@sha256` digest into `batch_container_image` inside `stages/enterprise/envs/staging.tfvars` and `prod.tfvars`.
-4. Store every source database replication password in regional Secret Manager (`gcloud secrets create`) and pass version paths only.
-5. Deploy `dev` first with `enable_schedule = false` to validate pipelines safely with manual runs.
-6. Promote `dev -> staging -> prod` through `.github/workflows/terraform-deploy.yml`, keeping `delete_contents_on_destroy = false` in `prod`.
+3. Copy `stages/enterprise/envs/<env>.tfvars.example` to `stages/enterprise/envs/<env>.tfvars` before editing `staging.tfvars` and `prod.tfvars`.
+
+```bash
+cp stages/enterprise/envs/<env>.tfvars.example stages/enterprise/envs/<env>.tfvars
+```
+
+4. Paste that `@sha256` digest into `batch_container_image` inside `stages/enterprise/envs/staging.tfvars` and `prod.tfvars`.
+5. Store every source database replication password in regional Secret Manager (`gcloud secrets create`) and pass version paths only.
+6. Deploy `dev` first with `enable_schedule = false` to validate pipelines safely with manual runs.
+7. Promote `dev -> staging -> prod` through `.github/workflows/terraform-deploy.yml`, keeping `delete_contents_on_destroy = false` in `prod`.
 
 ## Step 4 — Day 1C: Medallion Warehouse Rollout (`gcp-data-medallion`)
 
@@ -120,13 +143,13 @@ Configure Dataform `3.1.5` SQLX transformations, dual-tier PII policy tags, and 
 4. Merge to `main` to update `dev-main` and `staging-main` Dataform release configs via `.github/workflows/dataform-promote.yml`.
 5. Cut an annotated Git tag (`git tag -a v1.0.0 -m "Release v1.0.0"`) and push it to promote `prod-main`.
 
-## Step 5 — Day 2: End-to-End Recipe to Onboard a New Business Data Source
+## Step 5 — Day 2: Onboard a New Business Data Source
 
 Add new business feeds across Ingestion, Medallion, and Foundation using this exact pull request order.
 
 1. **PR 1 (`gcp-data-ingestion`)**: Add schemas under `schemas/` and register the feed in `stages/enterprise/envs/<env>.tfvars` (`pubsub_streams`, `batch_jobs`, or `datastream_streams`).
 2. **PR 2 (`gcp-data-medallion`)**: Add `definitions/01_bronze/` declaration, `definitions/02_silver/` incremental or SCD2 model with PII tags, `definitions/03_gold/` mart, and `quality/*.yaml`.
-3. **PR 3 (`gcp-foundation`, optional)**: Update `domain_marts` in `01-platform` or `additional_quality_scans` in `02-governance-ops` when adding a Gold domain or scan.
+3. **PR 3 (`gcp-foundation`, optional)**: Update `domain_marts` in `01-platform` or `additional_quality_scans` in `02-governance-ops` when adding a Gold domain or scan. Adding a new `domain_marts` entry in `01-platform` also requires re-linking and re-applying `data/enterprise/02-governance-ops`.
 4. **Canary in `dev`**: Apply `dev`, send one valid event and one malformed event, and verify target and `*_quarantine` tables.
 5. **Promote to `prod`**: Promote Ingestion via `terraform-deploy.yml`, merge Medallion to `main`, and push an annotated `v*` Git tag.
 

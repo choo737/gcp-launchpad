@@ -8,3 +8,4 @@ preflight:
 
 clean:
 	find . \( -name "__pycache__" -o -name ".pytest_cache" \) -type d -prune -exec rm -rf {} +
+	rm -f 00_linked.auto.tfvars.json

@@ -78,8 +78,7 @@ Bind `roles/billing.viewer` separately on the target **Cloud Billing Account**.
 | `roles/logging.viewer` | Org / Folder | Cloud Logging | Check `2555`-day audit log sinks and locked buckets |
 | `roles/dataform.viewer` | Folder / Project | Dataform | Inspect Dataform repositories and release configurations |
 | `roles/dataplex.viewer` | Folder / Project | Dataplex | Inspect AutoDQ and data profile scans |
-| `roles/compute.networkViewer` | Folder / Project | Compute Engine | Inspect Shared VPC hosts, subnets, and attachments |
-| `roles/compute.orgFirewallPolicyUser` | Org / Folder | Compute Firewall Policy | Inspect folder hierarchical and VPC NGFW policies |
+| `roles/compute.viewer` | Org / Folder | Compute Engine & Firewall Policy | Inspect Shared VPCs, subnets, and firewall policies without `.use` permissions |
 | `roles/resourcemanager.tagViewer` | Org / Folder | Resource Manager Tags | Inspect `GCE_FIREWALL` IAM secure tag keys and values |
 | `roles/monitoring.viewer` | Project | Cloud Monitoring | Inspect FinOps and SCC alert notification channels |
 | `roles/backupdr.viewer` | Project | Backup and DR | Inspect `BackupVault` enforced retention and `BackupPlan` jobs |

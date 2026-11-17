@@ -62,12 +62,12 @@ flowchart TD
 
 Follow the full cross-repository runbook in [docs/01-end-to-end-operational-playbook.md](docs/01-end-to-end-operational-playbook.md).
 
-1. **Step 1 (Day 0)**: Complete [QUESTIONNAIRE.md](QUESTIONNAIRE.md), run `scripts/preflight-check.sh`, and write gitignored `platform-context.json`.
-2. **Step 2 (Day 0)**: Create private repositories (`--private`), set `CODEOWNERS` and branch protection, and scope keyless GitHub WIF (`ci_repository_map`).
-3. **Step 3 (Day 1)**: Deploy `gcp-foundation` (`00-bootstrap` -> `01-org-governance` -> `02-security-network` -> `data/enterprise/*`). For Brownfield, run `scripts/generate-brownfield-link.py`.
-4. **Step 4 (Day 1)**: Deploy `gcp-data-ingestion` across `dev -> staging -> prod` with immutable loader digests and Secret Manager credentials.
-5. **Step 5 (Day 1)**: Deploy `gcp-data-medallion` via PR dry-runs and cut an annotated `v1.0.0` Git tag to promote `prod-main`.
-6. **Step 6 (Day 2)**: Onboard new business feeds across Ingestion (`tfvars` maps) and Medallion (`01_bronze`..`03_gold`). Update Foundation (`additional_quality_scans` or Gold domains) when needed.
+1. **Step 1 — Day 0: Architecture Intake & Private Repository Bootstrap**. Complete [QUESTIONNAIRE.md](QUESTIONNAIRE.md), create `--private` repos, and deploy `00-bootstrap` WIF.
+2. **Step 2 — Day 1A: Landing Zone Rollout (`gcp-foundation`) or Brownfield Bridge**. Deploy `gcp-foundation` with `link-stages.sh`, or run `scripts/generate-brownfield-link.py`.
+3. **Step 3 — Day 1B: Ingestion Rollout (`gcp-data-ingestion`)**. Link upstream outputs, build `@sha256` loaders, store secrets, and promote environments.
+4. **Step 4 — Day 1C: Medallion Warehouse Rollout (`gcp-data-medallion`)**. Set `workflow_settings.yaml`, run PR dry-runs, and push `v*` tags for `prod-main`.
+5. **Step 5 — Day 2: Onboard a New Business Data Source**. Add feeds in Ingestion, models in Medallion, and Gold domains in Foundation.
+6. **Step 6 — Day 2: Incident Triage, Drift-Safe Changes & Scale Triggers**. Query telemetry, replay quarantine, run drift-safe plans, and split domains at scale.
 
 ## AI Coding Agent Quickstart
 
@@ -104,7 +104,7 @@ Every push to `main` and every pull request runs `.github/workflows/ci.yml` on `
 
 - `assets/`: Cloud City visual architecture animations and org completeness scanner diagram.
 - `QUESTIONNAIRE.md`: Six-section Tier-1 intake questionnaire producing gitignored `platform-context.json`.
-- `docs/`: End-to-end operational playbook and template documentation standard.
+- `docs/`: End-to-end operational playbook, template documentation standard, and `03-org-completeness-scanner-design.md`.
 - `examples/`: Reference `platform-context.greenfield.json` and `platform-context.brownfield.json` contracts.
 - `scripts/`: `preflight-check.sh` validator and `generate-brownfield-link.py` tfvars bridge (`0600`).
 - `.agents/skills/`: Agent skills for `route-architecture` and `brownfield-bridge`.

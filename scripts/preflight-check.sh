@@ -22,12 +22,12 @@ EOF
 }
 
 die() {
-  printf 'Error: %s\n' "$1" >&2
+  printf 'ERROR: %s\n' "$1" >&2
   exit 1
 }
 
 die_usage() {
-  printf 'Error: %s\n' "$1" >&2
+  printf 'ERROR: %s\n' "$1" >&2
   exit 2
 }
 
@@ -35,7 +35,7 @@ require_arg_value() {
   local flag="$1"
   local remaining="$2"
   local value="${3:-}"
-  if [ "$remaining" -lt 2 ] || [ -z "$value" ] || [[ "$value" == --* ]]; then
+  if [ "$remaining" -lt 2 ] || [ -z "$value" ] || [[ "$value" == -* ]]; then
     die_usage "Missing or empty value for ${flag}"
   fi
 }
@@ -43,7 +43,7 @@ require_arg_value() {
 require_inline_value() {
   local flag="$1"
   local value="$2"
-  if [ -z "$value" ] || [[ "$value" == --* ]]; then
+  if [ -z "$value" ] || [[ "$value" == -* ]]; then
     die_usage "Missing or empty value for ${flag}"
   fi
 }
@@ -153,6 +153,13 @@ if [ "$dry_run" = true ]; then
   if [ -n "$org_id" ]; then
     printf '  Planned check: gcloud organizations describe %s\n' "$org_id"
   fi
+  if [ -n "$region" ]; then
+    if [ -n "$project_id" ]; then
+      printf '  Planned check: gcloud compute regions describe %s --project=%s\n' "$region" "$project_id"
+    else
+      printf '  Planned check: gcloud compute regions list --filter=name=%s\n' "$region"
+    fi
+  fi
   exit 0
 fi
 
@@ -175,17 +182,39 @@ printf '  GitHub CLI authentication verified.\n'
 
 if [ -n "$project_id" ]; then
   printf '==> Checking project visibility: %s\n' "$project_id"
-  gcloud projects describe "$project_id" --format='value(projectId,lifecycleState)'
+  project_state="$(gcloud projects describe "$project_id" --format='value(lifecycleState)')"
+  printf '  Project %s lifecycleState: %s\n' "$project_id" "${project_state:-<empty>}"
+  if [ "$project_state" != "ACTIVE" ]; then
+    die "Project '${project_id}' is not ACTIVE (lifecycleState='${project_state:-unknown}')."
+  fi
 fi
 
 if [ -n "$folder_id" ]; then
   printf '==> Checking folder visibility: %s\n' "$folder_id"
-  gcloud resource-manager folders describe "$folder_id" --format='value(name,displayName)'
+  folder_state="$(gcloud resource-manager folders describe "$folder_id" --format='value(lifecycleState)')"
+  printf '  Folder %s lifecycleState: %s\n' "$folder_id" "${folder_state:-<empty>}"
+  if [ "$folder_state" != "ACTIVE" ]; then
+    die "Folder '${folder_id}' is not ACTIVE (lifecycleState='${folder_state:-unknown}')."
+  fi
 fi
 
 if [ -n "$org_id" ]; then
   printf '==> Checking organization visibility: %s\n' "$org_id"
   gcloud organizations describe "$org_id" --format='value(name,displayName)'
+fi
+
+if [ -n "$region" ]; then
+  if [ -n "$project_id" ]; then
+    printf '==> Checking region availability: %s (project: %s)\n' "$region" "$project_id"
+    gcloud compute regions describe "$region" --project="$project_id" --format='value(name,status)'
+  else
+    printf '==> Checking region availability: %s\n' "$region"
+    region_match="$(gcloud compute regions list --filter="name=${region}" --format='value(name,status)')"
+    if [ -z "$region_match" ]; then
+      die "Region '${region}' not found via gcloud compute regions list."
+    fi
+    printf '  %s\n' "$region_match"
+  fi
 fi
 
 printf 'Preflight checks passed.\n'
