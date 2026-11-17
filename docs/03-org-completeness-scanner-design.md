@@ -2,13 +2,13 @@
 
 This document specifies a read-only scanner for existing Google Cloud organizations.
 
-It checks live GCP resources against twelve platform areas (`D00` through `D11`).
+It checks live GCP resources against sixteen platform areas (`D00` through `D15`).
 
 ![GCP org setup check](../assets/cloud-city-org-scanner.png)
 
 ## Scanner Architecture
 
-A Cloud Run service behind Cloud IAP queries eight read-only GCP APIs on demand.
+A Cloud Run service behind Cloud IAP queries twelve read-only GCP APIs on demand.
 
 It never writes resources, changes IAM bindings, or stores customer secrets on disk.
 
@@ -24,9 +24,13 @@ flowchart LR
     CR --> BQ["BigQuery"]
     CR --> DF["Dataform"]
     CR --> DP["Dataplex"]
+    CR --> BIL["Billing Budgets"]
+    CR --> BDR["Backup and DR"]
+    CR --> NGFW["Cloud NGFW & Tags"]
+    CR --> SCC["Security Command Center"]
 ```
 
-## 12-Area Control-Plane Checks
+## 16-Area Control-Plane Checks
 
 Each check maps one visual area on the diagram to concrete GCP APIs.
 
@@ -44,6 +48,10 @@ Each check maps one visual area on the diagram to concrete GCP APIs.
 | `D09` | Filter lab & gold vaults | `03` | Data Catalog, Dataplex, BigQuery | PII policy tags, AutoDQ scans, Gold marts |
 | `D10` | Office towers | `04` | Cloud Armor, Cloud Run, GKE, Cloud SQL | HTTPS load balancer, WAF policy, regional HA database |
 | `D11` | Control tower & bridge | `04` | Vertex AI, Model Armor, Cloud Trace | ADK agent runtime (`gcp-adk-agent`), guardrails, traces |
+| `D12` | FinOps treasury | `01` | Cloud Billing, Billing Budgets, BigQuery | Dedicated `<prefix>-cmn-finops` project, billing export dataset, multi-budget Google Group alert channels |
+| `D13` | Backup vault | `01` | Backup and DR, Cloud Storage | Central `BackupVault` enforced retention, `BackupPlan` schedules, GCS `soft_delete_policy` |
+| `D14` | Firewall fabric | `01` | Compute Engine, Resource Manager | Folder Hierarchical + VPC Global NGFW Threat Intelligence rules, `GCE_FIREWALL` IAM Secure Tags |
+| `D15` | Security center | `01` | Security Command Center, Cloud KMS, Pub/Sub | Stage-01 Audit KMS CMEK on `<prefix>_scc_findings` export/Pub/Sub, active SCC runtime detectors |
 
 ## Status Values
 
@@ -65,6 +73,8 @@ Grant these four least-privilege roles to the scanner service account at the tar
 | `roles/logging.viewer` | Cloud Logging | Check `2555`-day audit log sinks and locked buckets |
 
 Add `roles/dataform.viewer` and `roles/dataplex.viewer` when scanning Layer 03 release configs and quality scans.
+
+Add `roles/billing.viewer`, `roles/backupdr.viewer`, `roles/compute.networkViewer`, and `roles/securitycenter.findingsViewer` for `D12` through `D15` checks.
 
 ## Deterministic Verification Commands
 

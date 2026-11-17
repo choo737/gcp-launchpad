@@ -331,6 +331,69 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 self.assertIsInstance(payload["selected_templates"], list)
                 self.assertIsInstance(payload["environments"], list)
                 self.assertIsInstance(payload["existing_landing_zone"], dict)
+                for pillar in ("finops", "backup_dr", "ngfw", "scc"):
+                    self.assertIn(pillar, payload)
+                    self.assertIsInstance(payload[pillar], dict)
+
+        gf = json.loads(
+            (REPO_ROOT / "examples" / "platform-context.greenfield.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(gf["compliance_profile"], "regulated_fsi_rmit")
+        self.assertTrue(gf["finops"]["create_dedicated_finops_project"])
+        self.assertEqual(gf["backup_dr"]["vault_enforced_retention_days"], 30)
+        self.assertFalse(gf["backup_dr"]["lock_backup_vault"])
+        self.assertEqual(gf["backup_dr"]["gcs_soft_delete_days"], 30)
+        self.assertTrue(gf["ngfw"]["enable_ngfw_enterprise"])
+        self.assertEqual(gf["scc"]["tier"], "PREMIUM")
+
+        bf = json.loads(
+            (REPO_ROOT / "examples" / "platform-context.brownfield.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(bf["compliance_profile"], "enterprise_standard")
+        self.assertTrue(bf["finops"]["create_dedicated_finops_project"])
+        self.assertEqual(bf["backup_dr"]["vault_enforced_retention_days"], 14)
+        self.assertFalse(bf["backup_dr"]["lock_backup_vault"])
+        self.assertEqual(bf["backup_dr"]["gcs_soft_delete_days"], 14)
+        self.assertFalse(bf["ngfw"]["enable_ngfw_enterprise"])
+        self.assertEqual(bf["scc"]["tier"], "STANDARD")
+        for key in ("finops_project_id", "backup_project_id", "backup_vault_id"):
+            self.assertIn(key, bf["existing_landing_zone"])
+
+    def test_questionnaire_four_pillars_and_official_links(self) -> None:
+        questionnaire = (REPO_ROOT / "QUESTIONNAIRE.md").read_text(encoding="utf-8")
+        expected_tokens = (
+            "### Pillar 1: FinOps Governance & Billing Export",
+            "### Pillar 2: Backup & Disaster Recovery",
+            "### Pillar 3: Cloud NGFW & Network Security",
+            "### Pillar 4: Security Command Center (SCC)",
+            "<prefix>-cmn-finops",
+            "billing_export_location",
+            "enable_backup_dr",
+            "lock_backup_vault",
+            "soft_delete_policy",
+            "ASYNC_TURBO",
+            "BNM RMiT",
+            "ALTER SCHEMA ... ADD REPLICA",
+            "GCE_FIREWALL",
+            "enable_ngfw_enterprise",
+            "SCC Enterprise",
+            "May 21, 2027",
+            "scc_scope",
+            "<prefix>_scc_findings",
+            "https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-setup",
+            "https://docs.cloud.google.com/docs/migration/plan/landing-zones",
+            "https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery",
+            "https://cloud.google.com/storage/sla",
+            "https://cloud.google.com/security/products/firewall",
+            "https://cloud.google.com/firewall/pricing",
+        )
+        for token in expected_tokens:
+            with self.subTest(token=token):
+                self.assertIn(token, questionnaire)
 
     def test_preflight_script_cli_and_validation(self) -> None:
         script = REPO_ROOT / "scripts" / "preflight-check.sh"
@@ -447,6 +510,12 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             self.assertEqual(linked["etl_compute_project_id"], "acme-dev01-data-etl")
             self.assertEqual(linked["primary_gold_project_id"], "acme-dev01-data-gold")
             self.assertEqual(linked["bi_compute_project_id"], "acme-dev01-data-bi")
+            self.assertEqual(linked["finops_project_id"], "acme-dev01-cmn-finops")
+            self.assertEqual(linked["backup_project_id"], "acme-dev01-cmn-backup")
+            self.assertEqual(
+                linked["backup_vault_id"],
+                "projects/acme-dev01-cmn-backup/locations/asia-southeast1/backupVaults/acme-vault-01",
+            )
             self.assertEqual(linked["primary_gold_dataset_id"], "gold")
             self.assertEqual(linked["kms_key_name"], linked["kms_key_id"])
             self.assertEqual(linked["network_id"], linked["vpc_id"])
@@ -558,6 +627,131 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             self.assertNotEqual(os_res.returncode, 0)
             self.assertIn("ERROR:", os_res.stderr)
             self.assertNotIn("Traceback", os_res.stderr)
+
+    def test_generate_brownfield_link_four_pillar_validation(self) -> None:
+        script = REPO_ROOT / "scripts" / "generate-brownfield-link.py"
+        brownfield_ctx = REPO_ROOT / "examples" / "platform-context.brownfield.json"
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            out_file = tmp_root / "pillar_linked.auto.tfvars.json"
+            target_vars = tmp_root / "variables.tf"
+            target_vars.write_text(
+                'variable "finops_project_id" { type = string }\n'
+                'variable "backup_project_id" { type = string }\n'
+                'variable "backup_vault_id" { type = string }\n',
+                encoding="utf-8",
+            )
+            override_vault = (
+                "projects/acme-prod-cmn-backup/locations/asia-southeast1/backupVaults/prod-vault-02"
+            )
+            res = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--context",
+                    str(brownfield_ctx),
+                    "--finops-project-id",
+                    "acme-prod-cmn-finops",
+                    "--backup-project-id",
+                    "acme-prod-cmn-backup",
+                    "--backup-vault-id",
+                    override_vault,
+                    "--target-variables-tf",
+                    str(target_vars),
+                    "--output",
+                    str(out_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(stat.S_IMODE(out_file.stat().st_mode), 0o600)
+            linked = json.loads(out_file.read_text(encoding="utf-8"))
+            self.assertEqual(
+                linked,
+                {
+                    "backup_project_id": "acme-prod-cmn-backup",
+                    "backup_vault_id": override_vault,
+                    "finops_project_id": "acme-prod-cmn-finops",
+                },
+            )
+
+            for bad_args in (
+                ["--context", str(brownfield_ctx), "--finops-project-id", "BAD_FINOPS"],
+                ["--context", str(brownfield_ctx), "--finops-project-id", "ab"],
+                ["--context", str(brownfield_ctx), "--backup-project-id", "BAD_BACKUP"],
+                ["--context", str(brownfield_ctx), "--backup-vault-id", "not/a/vault"],
+                [
+                    "--context",
+                    str(brownfield_ctx),
+                    "--backup-vault-id",
+                    "projects/acme-dev01-cmn-backup/locations/asia-southeast1/backupVaults/UPPER_BAD",
+                ],
+                [
+                    "--context",
+                    str(brownfield_ctx),
+                    "--backup-vault-id",
+                    "projects/acme-dev01-cmn-backup/locations/asia-southeast1/backupVaults/v",
+                ],
+            ):
+                with self.subTest(bad_args=bad_args):
+                    err_res = subprocess.run(
+                        [sys.executable, str(script), *bad_args, "--output", str(out_file)],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(err_res.returncode, 0)
+                    self.assertIn("ERROR:", err_res.stderr)
+
+            for field in ("finops_project_id", "backup_project_id", "backup_vault_id"):
+                for bad_val in (True, 42):
+                    with self.subTest(field=field, bad_val=bad_val):
+                        bad_ctx = tmp_root / f"bad-{field}-{type(bad_val).__name__}.json"
+                        payload = json.loads(brownfield_ctx.read_text(encoding="utf-8"))
+                        payload["existing_landing_zone"][field] = bad_val
+                        bad_ctx.write_text(json.dumps(payload), encoding="utf-8")
+                        type_res = subprocess.run(
+                            [
+                                sys.executable,
+                                str(script),
+                                "--context",
+                                str(bad_ctx),
+                                "--output",
+                                str(out_file),
+                            ],
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+                        self.assertNotEqual(type_res.returncode, 0)
+                        self.assertIn("ERROR:", type_res.stderr)
+
+    def test_org_scanner_design_covers_d00_through_d15(self) -> None:
+        scanner_doc = (
+            REPO_ROOT / "docs" / "03-org-completeness-scanner-design.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("sixteen platform areas (`D00` through `D15`)", scanner_doc)
+        self.assertIn("## 16-Area Control-Plane Checks", scanner_doc)
+        for idx in range(16):
+            check_id = f"`D{idx:02d}`"
+            with self.subTest(check_id=check_id):
+                self.assertIn(check_id, scanner_doc)
+        for expected in (
+            "<prefix>-cmn-finops",
+            "BackupVault",
+            "soft_delete_policy",
+            "GCE_FIREWALL",
+            "<prefix>_scc_findings",
+            "roles/billing.viewer",
+            "roles/backupdr.viewer",
+            "roles/compute.networkViewer",
+            "roles/securitycenter.findingsViewer",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, scanner_doc)
 
     def test_playbook_contains_complete_commands_and_variables(self) -> None:
         playbook = (REPO_ROOT / "docs" / "01-end-to-end-operational-playbook.md").read_text(

@@ -54,8 +54,8 @@ Provision the Greenfield landing zone in `gcp-foundation`, or run the Brownfield
 
 ### Option A: Greenfield (`gcp-foundation`)
 
-1. Deploy `foundation/01-org-governance` once to apply 36 Org Policies, locked audit bucket, project lien, and SCC tier.
-2. Deploy `foundation/02-security-network` per environment (`dev`, `staging`, `prod`) for Shared VPC, KMS keys, and VPC-SC.
+1. Deploy `foundation/01-org-governance` once to apply 36 Org Policies, locked audit bucket, FinOps budgets, and SCC tier.
+2. Deploy `foundation/02-security-network` per environment (`dev`, `staging`, `prod`) for Shared VPC, KMS, NGFW, `BackupVault`, and VPC-SC.
 3. Keep `enforce_vpc_sc = false` initially so VPC-SC runs in `DRY_RUN` mode while validating traffic.
 4. Deploy `data/enterprise/01-platform` and `data/enterprise/02-governance-ops` per environment (`dev`, `staging`, `prod`).
 5. Export non-sensitive stage outputs per environment to Cloud Storage with `scripts/link-stages.sh`.
@@ -117,7 +117,7 @@ Add new business feeds across Ingestion, Medallion, and Foundation using this ex
 
 Operate live pipelines with telemetry queries, quarantine replay, drift-safe Terraform applies, and planned domain splits.
 
-- **Telemetry & alerts**: Query `<prefix>_ops_telemetry.pipeline_runs` (`execution_id`, `status`, `recorded_at`), and triage SCC and Cloud Monitoring alerts.
+- **Telemetry & alerts**: Query `<prefix>_ops_telemetry.pipeline_runs` (`execution_id`, `status`, `recorded_at`), `<prefix>_scc_findings`, and FinOps budget alerts.
 - **DLQ & quarantine replay**: Inspect `<target_table_id>_quarantine` tables or GCS `quarantine/*.error.json` sidecars, fix payloads, and replay into `source_prefix`.
 - **VPC-SC dry-run checks**: Test new principals and services in `DRY_RUN` mode in Log Analytics before updating `prod` enforced perimeters.
 - **Drift-safe Terraform changes**: Run `make plan STAGE=<stage> ENV=<env> TFSTATE_BUCKET=<bucket>` before `make apply`, and import existing resources.

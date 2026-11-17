@@ -18,5 +18,73 @@
   "project_suffix": "dev01",
   "github_owner": "example-org",
   "ci_identity_mode": "github_oidc_wif",
+  "finops": {
+    "create_dedicated_finops_project": true,
+    "billing_export_location": "asia-southeast1",
+    "billing_export_dataset": "billing_export",
+    "budget_thresholds_actual_pct": [
+      50,
+      80,
+      90,
+      100
+    ],
+    "budget_thresholds_forecasted_pct": [
+      100
+    ],
+    "budgets": {
+      "master": 10000,
+      "dev": 1500,
+      "staging": 2500,
+      "prod": 6000,
+      "workloads": {
+        "data-platform": 5000
+      }
+    },
+    "alert_groups": [
+      "gcp-finops-alerts@example.com",
+      "gcp-billing-admins@example.com",
+      "data-platform-owners@example.com"
+    ],
+    "enable_pubsub_alerts": true
+  },
+  "backup_dr": {
+    "enable_backup_dr": true,
+    "vault_enforced_retention_days": 30,
+    "lock_backup_vault": false,
+    "gcs_soft_delete_days": 30,
+    "gcs_dual_region_rpo": "ASYNC_TURBO",
+    "cross_border_dual_region_approved": true,
+    "bq_time_travel_hours": 168,
+    "bq_dr_mode": "cross_region_replica"
+  },
+  "ngfw": {
+    "enable_2_layer_policy": true,
+    "folder_hierarchical_policy": true,
+    "vpc_global_network_policy": true,
+    "tier": "NGFW_ENTERPRISE",
+    "enable_ngfw_enterprise": true,
+    "secure_tags": {
+      "tier": [
+        "web",
+        "app",
+        "data"
+      ],
+      "access": [
+        "allow-iap"
+      ]
+    }
+  },
+  "scc": {
+    "tier": "PREMIUM",
+    "scc_scope": "organization",
+    "enable_audit_kms_cmek": true,
+    "alert_group": "gcp-secops-alerts@example.com",
+    "runtime_detectors": [
+      "EVENT_THREAT_DETECTION",
+      "CONTAINER_THREAT_DETECTION",
+      "VM_THREAT_DETECTION",
+      "CLOUD_RUN_THREAT_DETECTION"
+    ]
+  },
   "existing_landing_zone": {}
 }

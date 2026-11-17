@@ -17,6 +17,69 @@
   "project_suffix": "dev01",
   "github_owner": "example-org",
   "ci_identity_mode": "github_oidc_wif",
+  "finops": {
+    "create_dedicated_finops_project": true,
+    "billing_export_location": "US",
+    "billing_export_dataset": "billing_export",
+    "budget_thresholds_actual_pct": [
+      50,
+      80,
+      90,
+      100
+    ],
+    "budget_thresholds_forecasted_pct": [
+      100
+    ],
+    "budgets": {
+      "master": 5000,
+      "dev": 500,
+      "staging": 1500,
+      "prod": 3000,
+      "workloads": {
+        "data-platform": 2500
+      }
+    },
+    "alert_groups": [
+      "gcp-finops-alerts@example.com",
+      "gcp-billing-admins@example.com",
+      "data-platform-owners@example.com"
+    ],
+    "enable_pubsub_alerts": true
+  },
+  "backup_dr": {
+    "enable_backup_dr": true,
+    "vault_enforced_retention_days": 14,
+    "lock_backup_vault": false,
+    "gcs_soft_delete_days": 14,
+    "gcs_dual_region_rpo": "DEFAULT",
+    "cross_border_dual_region_approved": false,
+    "bq_time_travel_hours": 168,
+    "bq_dr_mode": "time_travel_only"
+  },
+  "ngfw": {
+    "enable_2_layer_policy": true,
+    "folder_hierarchical_policy": true,
+    "vpc_global_network_policy": true,
+    "tier": "NGFW_STANDARD",
+    "enable_ngfw_enterprise": false,
+    "secure_tags": {
+      "tier": [
+        "web",
+        "app",
+        "data"
+      ],
+      "access": [
+        "allow-iap"
+      ]
+    }
+  },
+  "scc": {
+    "tier": "STANDARD",
+    "scc_scope": "folder",
+    "enable_audit_kms_cmek": true,
+    "alert_group": "gcp-secops-alerts@example.com",
+    "runtime_detectors": []
+  },
   "existing_landing_zone": {
     "environment": "dev",
     "region": "asia-southeast1",
@@ -26,6 +89,9 @@
     "analytics_project_id": "acme-dev01-data-gold",
     "bi_project_id": "acme-dev01-data-bi",
     "governance_project_id": "acme-dev01-data-gov",
+    "finops_project_id": "acme-dev01-cmn-finops",
+    "backup_project_id": "acme-dev01-cmn-backup",
+    "backup_vault_id": "projects/acme-dev01-cmn-backup/locations/asia-southeast1/backupVaults/acme-vault-01",
     "bronze_dataset_id": "bronze",
     "silver_dataset_id": "silver",
     "gold_dataset_id": "gold",

@@ -40,6 +40,9 @@ POLICY_TAG_RE = re.compile(
 ARTIFACT_REGISTRY_URI_RE = re.compile(
     r"^[a-z0-9-]+-docker\.pkg\.dev/[a-z][a-z0-9-]{4,28}[a-z0-9]/[a-z0-9][a-z0-9._-]{0,62}$"
 )
+BACKUP_VAULT_ID_RE = re.compile(
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/backupVaults/[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
+)
 TF_VAR_DECL_RE = re.compile(r'^\s*variable\s+"([A-Za-z0-9_]+)"\s*\{', re.MULTILINE)
 
 REQUIRED_FIELDS = (
@@ -56,6 +59,9 @@ FIELD_FLAGS = (
     "analytics_project_id",
     "bi_project_id",
     "governance_project_id",
+    "finops_project_id",
+    "backup_project_id",
+    "backup_vault_id",
     "bronze_dataset_id",
     "silver_dataset_id",
     "gold_dataset_id",
@@ -191,6 +197,8 @@ def validate_inputs(values: dict[str, str]) -> None:
         "analytics_project_id",
         "bi_project_id",
         "governance_project_id",
+        "finops_project_id",
+        "backup_project_id",
     ):
         if values.get(field):
             _validate_pattern(field, values[field], PROJECT_ID_RE)
@@ -221,6 +229,10 @@ def validate_inputs(values: dict[str, str]) -> None:
 
     if values.get("kms_key_id"):
         _validate_pattern("kms_key_id", values["kms_key_id"], KMS_KEY_RE)
+    if values.get("backup_vault_id"):
+        _validate_pattern(
+            "backup_vault_id", values["backup_vault_id"], BACKUP_VAULT_ID_RE
+        )
     if values.get("vpc_id"):
         _validate_pattern("vpc_id", values["vpc_id"], VPC_ID_RE)
     if values.get("subnet_id"):
