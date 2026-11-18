@@ -6,9 +6,10 @@ This standard defines the shared structure, prose rules, and security checks acr
 
 Every active and planned template repository in the suite must follow this standard.
 
-- **Active templates**: `gcp-launchpad`, `gcp-foundation`, `gcp-data-ingestion`, and `gcp-data-medallion`.
+- **Active templates**: `gcp-launchpad`, `gcp-foundation`, `gcp-data-ingestion`, `gcp-data-medallion`, and `gcp-data-science`.
 - **Planned templates**: `gcp-webapp` and `gcp-adk-agent`.
-- Never create `GEMINI.md` or `catalog.yaml` in any repository; `README.md`, `AGENTS.md`, and `CLAUDE.md` serve as entry docs.
+- Never create `GEMINI.md` or `catalog.yaml`.
+- Use `README.md`, `AGENTS.md`, and `CLAUDE.md` as entry docs.
 
 ## Required Repository Files & Folders
 

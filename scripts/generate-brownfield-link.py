@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate 00_linked.auto.tfvars.json for brownfield gcp-data-ingestion deployments."""
+"""Generate 00_linked.auto.tfvars.json for brownfield gcp-data-ingestion or gcp-data-science deployments."""
 
 from __future__ import annotations
 
@@ -54,7 +54,24 @@ ARTIFACT_REGISTRY_URI_RE = re.compile(
 BACKUP_VAULT_ID_RE = re.compile(
     r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/backupVaults/[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
 )
+TABLE_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+ML_ARTIFACT_REPO_SHORT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
+ML_ARTIFACT_REPO_PATH_RE = re.compile(
+    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/repositories/[a-z0-9][a-z0-9._-]{0,62}$"
+)
 TF_VAR_DECL_RE = re.compile(r'^\s*variable\s+"([A-Za-z0-9_]+)"\s*\{', re.MULTILINE)
+
+DS_SERVING_TRACKS = frozenset({"bqml_batch", "vertex_cpr_online", "both"})
+DATA_SCIENCE_CONFIG_KEYS = frozenset({
+    "enable_data_science",
+    "ds_serving_track",
+    "enable_ds_workbench",
+    "enable_colab_enterprise",
+    "enable_online_feature_store",
+    "xai_audit_retention_days",
+    "shap_additivity_tolerance",
+    "fairness_min_disparate_impact",
+})
 
 REQUIRED_FIELDS = (
     "core_project_id",
@@ -62,6 +79,11 @@ REQUIRED_FIELDS = (
     "bronze_dataset_id",
     "landing_bucket_name",
     "dataform_repository_name",
+)
+
+DATA_SCIENCE_REQUIRED_FIELDS = (
+    "ds_exp_project_id",
+    "ml_ops_project_id",
 )
 
 FIELD_FLAGS = (
@@ -100,6 +122,17 @@ FIELD_FLAGS = (
     "domain_name",
 )
 
+DATA_SCIENCE_FIELD_FLAGS = (
+    "ds_exp_project_id",
+    "ml_ops_project_id",
+    "ml_artifact_repo_id",
+    "ml_audit_dataset_id",
+    "ml_audit_table_id",
+    "ml_worm_bucket_name",
+    "egress_connector_subnet_id",
+    "ds_serving_track",
+)
+
 BOOLEAN_LANDING_ZONE_KEYS = frozenset({"manage_kms_iam"})
 
 ALIAS_PAIRS = (
@@ -115,7 +148,10 @@ ALIAS_PAIRS = (
 
 ALIAS_RHS_TO_LHS = {alias: primary for primary, alias in ALIAS_PAIRS}
 VALID_LANDING_ZONE_KEYS = (
-    frozenset(FIELD_FLAGS) | frozenset(ALIAS_RHS_TO_LHS) | BOOLEAN_LANDING_ZONE_KEYS
+    frozenset(FIELD_FLAGS)
+    | frozenset(DATA_SCIENCE_FIELD_FLAGS)
+    | frozenset(ALIAS_RHS_TO_LHS)
+    | BOOLEAN_LANDING_ZONE_KEYS
 )
 
 # Mirrors gcp-data-ingestion/stages/enterprise/variables.tf so unfiltered
@@ -200,13 +236,56 @@ INGESTION_DECLARED_VARS = frozenset({
     "datastream_streams",
 })
 
+# Mirrors gcp-data-science/stages/enterprise/variables.tf so --target data-science
+# emits only declared Data Science stage variables.
+DATA_SCIENCE_DECLARED_VARS = frozenset({
+    "alert_notification_channel_ids",
+    "bqml_schedule_cron",
+    "core_project_id",
+    "cpr_container_image",
+    "deploy_cpr_model",
+    "domain_name",
+    "ds_exp_project_id",
+    "ds_serving_track",
+    "egress_connector_subnet_id",
+    "enable_bqml_schedule",
+    "enable_online_feature_store",
+    "enable_scorer_service",
+    "environment",
+    "fairness_min_disparate_impact",
+    "feature_group_source_table",
+    "feature_online_store_max_nodes",
+    "feature_online_store_min_nodes",
+    "feature_sync_cron",
+    "kms_key_id",
+    "labels",
+    "manage_kms_iam",
+    "ml_artifact_repo_id",
+    "ml_audit_dataset_id",
+    "ml_audit_table_id",
+    "ml_ops_project_id",
+    "ml_worm_bucket_name",
+    "prefix",
+    "region",
+    "scorer_container_image",
+    "shap_additivity_tolerance",
+    "silver_dataset_id",
+    "vpc_id",
+})
+
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Generate 00_linked.auto.tfvars.json for brownfield "
-            "gcp-data-ingestion deployments."
+            "gcp-data-ingestion or gcp-data-science deployments."
         )
+    )
+    parser.add_argument(
+        "--target",
+        choices=("ingestion", "data-science"),
+        default="ingestion",
+        help="Target downstream repository (default: ingestion).",
     )
     parser.add_argument(
         "--context",
@@ -219,7 +298,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="Target environment (dev, staging, prod) for by_environment resolution.",
     )
-    for field in FIELD_FLAGS:
+    for field in FIELD_FLAGS + DATA_SCIENCE_FIELD_FLAGS:
         flag = "--" + field.replace("_", "-")
         parser.add_argument(flag, dest=field, default=None)
     for _, alias in ALIAS_PAIRS:
@@ -347,6 +426,83 @@ def _normalize_landing_zone_dict(
     return normalized
 
 
+def _validate_ml_artifact_repo(value: str) -> None:
+    if not (
+        ML_ARTIFACT_REPO_SHORT_RE.match(value)
+        or ML_ARTIFACT_REPO_PATH_RE.match(value)
+        or ARTIFACT_REGISTRY_URI_RE.match(value)
+    ):
+        raise ValueError(
+            f"Invalid ml_artifact_repo_id '{value}': expected short repo ID, "
+            "projects/<project>/locations/<region>/repositories/<repo>, "
+            "or <region>-docker.pkg.dev/<project>/<repo>"
+        )
+
+
+def validate_data_science_config(payload: dict[str, object]) -> dict[str, object]:
+    ds_cfg = payload.get("data_science")
+    if not isinstance(ds_cfg, dict):
+        raise ValueError("data_science must be a JSON object.")
+    if set(ds_cfg.keys()) != DATA_SCIENCE_CONFIG_KEYS:
+        missing = sorted(DATA_SCIENCE_CONFIG_KEYS - set(ds_cfg.keys()))
+        extra = sorted(set(ds_cfg.keys()) - DATA_SCIENCE_CONFIG_KEYS)
+        raise ValueError(
+            f"Invalid data_science keys (missing={missing}, extra={extra})."
+        )
+    for bool_key in (
+        "enable_data_science",
+        "enable_ds_workbench",
+        "enable_colab_enterprise",
+        "enable_online_feature_store",
+    ):
+        if not isinstance(ds_cfg[bool_key], bool):
+            raise ValueError(
+                f"data_science.{bool_key} must be a boolean, got {type(ds_cfg[bool_key]).__name__}"
+            )
+    track = ds_cfg["ds_serving_track"]
+    if not isinstance(track, str) or track not in DS_SERVING_TRACKS:
+        raise ValueError(
+            f"Invalid data_science.ds_serving_track '{track}': expected one of {sorted(DS_SERVING_TRACKS)}"
+        )
+    retention = ds_cfg["xai_audit_retention_days"]
+    if isinstance(retention, bool) or not isinstance(retention, int) or retention <= 0:
+        raise ValueError("data_science.xai_audit_retention_days must be a positive integer.")
+    shap_tol = ds_cfg["shap_additivity_tolerance"]
+    if (
+        isinstance(shap_tol, bool)
+        or not isinstance(shap_tol, (int, float))
+        or shap_tol <= 0
+        or shap_tol > 0.001
+    ):
+        raise ValueError("data_science.shap_additivity_tolerance must be > 0 and <= 0.001.")
+    disparate = ds_cfg["fairness_min_disparate_impact"]
+    if (
+        isinstance(disparate, bool)
+        or not isinstance(disparate, (int, float))
+        or disparate <= 0.0
+        or disparate > 1.0
+    ):
+        raise ValueError("data_science.fairness_min_disparate_impact must be > 0.0 and <= 1.0.")
+
+    compliance = payload.get("compliance_profile")
+    if compliance == "regulated_fsi_rmit":
+        if ds_cfg["enable_colab_enterprise"]:
+            raise ValueError(
+                "data_science.enable_colab_enterprise cannot be true when compliance_profile is regulated_fsi_rmit."
+            )
+        if retention < 2555:
+            raise ValueError(
+                "data_science.xai_audit_retention_days must be >= 2555 when compliance_profile is regulated_fsi_rmit."
+            )
+
+    primary_region = payload.get("primary_region")
+    if primary_region == "asia-southeast2" and ds_cfg["enable_online_feature_store"]:
+        raise ValueError(
+            "data_science.enable_online_feature_store cannot be true when primary_region is asia-southeast2."
+        )
+    return ds_cfg
+
+
 def load_context_values(
     context_path: Path, target_env: str | None = None
 ) -> dict[str, object]:
@@ -360,6 +516,16 @@ def load_context_values(
         _validate_environment(target_env)
 
     values: dict[str, object] = {}
+    if "data_science" in payload and payload["data_science"] is not None:
+        ds_cfg = validate_data_science_config(payload)
+        for ds_key in (
+            "ds_serving_track",
+            "enable_online_feature_store",
+            "shap_additivity_tolerance",
+            "fairness_min_disparate_impact",
+        ):
+            values[ds_key] = ds_cfg[ds_key]
+
     landing_zone = payload.get("existing_landing_zone")
     if landing_zone is not None:
         if not isinstance(landing_zone, dict):
@@ -435,8 +601,11 @@ def load_context_values(
     return values
 
 
-def validate_inputs(values: dict[str, object]) -> None:
-    for required in REQUIRED_FIELDS:
+def validate_inputs(values: dict[str, object], target: str = "ingestion") -> None:
+    required_fields = (
+        DATA_SCIENCE_REQUIRED_FIELDS if target == "data-science" else REQUIRED_FIELDS
+    )
+    for required in required_fields:
         if not values.get(required):
             raise ValueError(f"Missing required brownfield field: {required}")
 
@@ -448,6 +617,8 @@ def validate_inputs(values: dict[str, object]) -> None:
         "governance_project_id",
         "finops_project_id",
         "backup_project_id",
+        "ds_exp_project_id",
+        "ml_ops_project_id",
     ):
         val = values.get(field)
         if isinstance(val, str) and val:
@@ -460,15 +631,29 @@ def validate_inputs(values: dict[str, object]) -> None:
         "quarantine_dataset_id",
         "assertions_dataset_id",
         "ops_telemetry_dataset_id",
+        "ml_audit_dataset_id",
     ):
         val = values.get(field)
         if isinstance(val, str) and val:
             _validate_pattern(field, val, DATASET_ID_RE)
 
-    _validate_pattern(
-        "landing_bucket_name", str(values["landing_bucket_name"]), BUCKET_NAME_RE
-    )
-    _validate_dataform_repository(str(values["dataform_repository_name"]))
+    if values.get("ml_audit_table_id"):
+        _validate_pattern(
+            "ml_audit_table_id", str(values["ml_audit_table_id"]), TABLE_ID_RE
+        )
+
+    if values.get("landing_bucket_name"):
+        _validate_pattern(
+            "landing_bucket_name", str(values["landing_bucket_name"]), BUCKET_NAME_RE
+        )
+    if values.get("ml_worm_bucket_name"):
+        _validate_pattern(
+            "ml_worm_bucket_name", str(values["ml_worm_bucket_name"]), BUCKET_NAME_RE
+        )
+    if values.get("dataform_repository_name"):
+        _validate_dataform_repository(str(values["dataform_repository_name"]))
+    if values.get("ml_artifact_repo_id"):
+        _validate_ml_artifact_repo(str(values["ml_artifact_repo_id"]))
 
     if values.get("dataform_release_config_name"):
         _validate_release_config(str(values["dataform_release_config_name"]))
@@ -497,6 +682,12 @@ def validate_inputs(values: dict[str, object]) -> None:
         _validate_pattern("vpc_id", str(values["vpc_id"]), VPC_ID_RE)
     if values.get("subnet_id"):
         _validate_pattern("subnet_id", str(values["subnet_id"]), SUBNET_ID_RE)
+    if values.get("egress_connector_subnet_id"):
+        _validate_pattern(
+            "egress_connector_subnet_id",
+            str(values["egress_connector_subnet_id"]),
+            SUBNET_ID_RE,
+        )
     if values.get("datastream_network_attachment_id"):
         _validate_pattern(
             "datastream_network_attachment_id",
@@ -529,6 +720,19 @@ def validate_inputs(values: dict[str, object]) -> None:
         _validate_pattern("prefix", str(values["prefix"]), PREFIX_RE)
     if values.get("domain_name"):
         _validate_pattern("domain_name", str(values["domain_name"]), DOMAIN_NAME_RE)
+    if values.get("ds_serving_track"):
+        track = str(values["ds_serving_track"])
+        if track not in DS_SERVING_TRACKS:
+            raise ValueError(
+                f"Invalid ds_serving_track '{track}': expected one of {sorted(DS_SERVING_TRACKS)}"
+            )
+    if (
+        values.get("region") == "asia-southeast2"
+        and values.get("enable_online_feature_store") is True
+    ):
+        raise ValueError(
+            "enable_online_feature_store cannot be true when region is asia-southeast2."
+        )
 
 
 def resolve_env_gcs_uri(uri: str, env: str) -> str:
@@ -561,7 +765,9 @@ def resolve_env_gcs_uri(uri: str, env: str) -> str:
     return f"gs://{bucket}/{env}/{filename}"
 
 
-def format_kms_binding_commands(values: dict[str, object]) -> list[str]:
+def format_kms_binding_commands(
+    values: dict[str, object], target: str = "ingestion"
+) -> list[str]:
     kms_key_id = values.get("kms_key_id")
     if not isinstance(kms_key_id, str) or not kms_key_id:
         raise ValueError("kms_key_id is required when --print-kms-commands is passed.")
@@ -569,6 +775,32 @@ def format_kms_binding_commands(values: dict[str, object]) -> list[str]:
     if not match:
         raise ValueError(f"Invalid kms_key_id '{kms_key_id}'")
     kms_project, kms_location, kms_keyring, kms_key = match.groups()
+
+    if target == "data-science":
+        ml_ops_project = values.get("ml_ops_project_id")
+        if not isinstance(ml_ops_project, str) or not ml_ops_project:
+            raise ValueError("ml_ops_project_id is required when --print-kms-commands is passed.")
+        ds_exp_project = values.get("ds_exp_project_id")
+        if not isinstance(ds_exp_project, str) or not ds_exp_project:
+            raise ValueError("ds_exp_project_id is required when --print-kms-commands is passed.")
+
+        commands = [
+            f"ML_OPS_PROJECT_NUMBER=\"$(gcloud projects describe '{ml_ops_project}' --format='value(projectNumber)')\"",
+            f"DS_EXP_PROJECT_NUMBER=\"$(gcloud projects describe '{ds_exp_project}' --format='value(projectNumber)')\"",
+        ]
+        members = [
+            "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com",
+            "serviceAccount:service-${DS_EXP_PROJECT_NUMBER}@gcp-sa-notebooks.iam.gserviceaccount.com",
+        ]
+        commands.extend(
+            (
+                f"gcloud kms keys add-iam-policy-binding {kms_key} "
+                f"--project={kms_project} --location={kms_location} --keyring={kms_keyring} "
+                f"--member={member} --role=roles/cloudkms.cryptoKeyEncrypterDecrypter"
+            )
+            for member in members
+        )
+        return commands
 
     compute_project = values.get("compute_project_id")
     if not isinstance(compute_project, str) or not compute_project:
@@ -601,7 +833,9 @@ def format_kms_binding_commands(values: dict[str, object]) -> list[str]:
 
 
 def build_linked_tfvars(
-    values: dict[str, object], target_variables_tf: Path | None = None
+    values: dict[str, object],
+    target_variables_tf: Path | None = None,
+    target: str = "ingestion",
 ) -> dict[str, object]:
     linked: dict[str, object] = {}
     for key, val in values.items():
@@ -620,6 +854,8 @@ def build_linked_tfvars(
         declared = set(
             TF_VAR_DECL_RE.findall(target_variables_tf.read_text(encoding="utf-8"))
         )
+    elif target == "data-science":
+        declared = DATA_SCIENCE_DECLARED_VARS
     else:
         declared = INGESTION_DECLARED_VARS
 
@@ -690,7 +926,7 @@ def main(argv: list[str] | None = None) -> int:
         elif target_env is not None:
             values["environment"] = target_env
 
-        for field in FIELD_FLAGS:
+        for field in FIELD_FLAGS + DATA_SCIENCE_FIELD_FLAGS:
             if field == "environment":
                 continue
             cli_val = getattr(args, field, None)
@@ -715,8 +951,10 @@ def main(argv: list[str] | None = None) -> int:
         elif values.get("kms_key_id") and values.get("manage_kms_iam") is not True:
             values["manage_kms_iam"] = False
 
-        validate_inputs(values)
-        linked = build_linked_tfvars(values, args.target_variables_tf)
+        validate_inputs(values, target=args.target)
+        linked = build_linked_tfvars(
+            values, args.target_variables_tf, target=args.target
+        )
         write_atomic_json(args.output, linked)
 
         if args.export_gcs is not None:
@@ -739,7 +977,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Uploaded linked variables to {resolved_gcs_uri}")
 
         if args.print_kms_commands:
-            for cmd in format_kms_binding_commands(values):
+            for cmd in format_kms_binding_commands(values, target=args.target):
                 print(cmd)
     except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

@@ -1,6 +1,6 @@
 # Tier-1 Architecture Router Questionnaire
 
-Answer these six sections to choose templates, compliance guardrails, and landing zone wiring.
+Answer these seven sections to choose templates, compliance guardrails, and landing zone wiring.
 
 Save answers in gitignored `platform-context.json` before creating private customer repositories.
 
@@ -8,13 +8,15 @@ Save answers in gitignored `platform-context.json` before creating private custo
 
 Which template capabilities do you need today?
 
-- **Active templates**: `gcp-foundation`, `gcp-data-ingestion`, and `gcp-data-medallion`.
+- **Active templates**: `gcp-foundation`, `gcp-data-ingestion`, `gcp-data-medallion`, and `gcp-data-science`.
 - **Planned roadmap templates**: `gcp-webapp` and `gcp-adk-agent`.
 
 | Common Combination | Selected Templates | Typical Entry Mode |
 | --- | --- | --- |
 | Full Data Platform | `gcp-foundation` + `gcp-data-ingestion` + `gcp-data-medallion` | Greenfield |
+| Full Data + Regulated ML | `gcp-foundation` + `gcp-data-ingestion` + `gcp-data-medallion` + `gcp-data-science` | Greenfield |
 | Brownfield Ingestion + Medallion | `gcp-data-ingestion` + `gcp-data-medallion` | Brownfield |
+| Brownfield Data Science | `gcp-data-science` | Brownfield |
 | Medallion Only on Existing Bronze | `gcp-data-medallion` | Brownfield |
 
 ### Team Size Tier (`team_size_tier`)
@@ -122,6 +124,22 @@ Specify the private GitHub target and CI authentication pattern.
 - **`github_plan`**: Choose `github_free`, `github_team` (private `CODEOWNERS`), or `github_enterprise` (Environment Required Reviewers).
 - **`ci_identity_mode`**: Choose `github_oidc_wif` for keyless GitHub Workload Identity Federation or `existing_ci_runner`.
 - Always create private repositories with `gh repo create --private` before storing customer values.
+
+## Section 7: Data Science & Regulated Explainable AI
+
+Configure `gcp-data-science` for model training, explainable scoring, and BNM RMiT audit retention.
+
+- **`enable_data_science`**: Set `true` to provision `data_science` tracks on top of Silver or Gold tables.
+- **Vertex `:explain` sunset**: Vertex AI Explainable AI (`explanationSpec`) retires March 2027 per [Vertex AI Deprecations](https://cloud.google.com/vertex-ai/docs/deprecations).
+- **Serving track (`ds_serving_track`)**: Choose `bqml_batch`, `vertex_cpr_online`, or `both` to avoid deprecated `:explain` APIs.
+- **Track A (`bqml_batch`)**: Run batch training and `ML.EXPLAIN_PREDICT` in BigQuery per [BigQuery XAI Overview](https://cloud.google.com/bigquery/docs/xai-overview).
+- **Track B (`vertex_cpr_online`)**: Serve real-time TreeSHAP attributions from Vertex AI Custom Prediction Routine (`CPR`) containers.
+- **Project isolation (`team_size_tier`)**: Tier `S` shares one project. Tiers `M` and `L` isolate `ds-exp` from `ml-ops`.
+- **Hardened Workbench (`enable_ds_workbench`)**: Enforce `disableRootAccess` and `disableFileDownloads` inside VPC-SC boundaries for regulated development.
+- **Colab Enterprise (`enable_colab_enterprise`)**: Must stay `false` under `regulated_fsi_rmit`. Enable only for non-FSI `enterprise_standard` or `sandbox_poc`.
+- **Online Feature Store (`enable_online_feature_store`)**: Uses Bigtable backing instead of `optimized` tier. Must stay `false` in `asia-southeast2`.
+- **7-year BNM RMiT WORM ledger (`xai_audit_retention_days`)**: Set `>= 2555` days under `regulated_fsi_rmit` for `ml_xai_audit_ledger` and WORM buckets.
+- **MRM `model-validator` gate**: Enforce `shap_additivity_tolerance` (`0.00001`, max `0.001`) and `fairness_min_disparate_impact` (`0.80`) before model promotion.
 
 ## Output Contract (`platform-context.json`)
 

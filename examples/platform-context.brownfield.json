@@ -6,7 +6,8 @@
   "github_plan": "github_team",
   "selected_templates": [
     "gcp-data-ingestion",
-    "gcp-data-medallion"
+    "gcp-data-medallion",
+    "gcp-data-science"
   ],
   "primary_region": "asia-southeast1",
   "dr_region": "",
@@ -77,6 +78,16 @@
     ],
     "runtime_detectors": []
   },
+  "data_science": {
+    "enable_data_science": true,
+    "ds_serving_track": "vertex_cpr_online",
+    "enable_ds_workbench": false,
+    "enable_colab_enterprise": false,
+    "enable_online_feature_store": true,
+    "xai_audit_retention_days": 365,
+    "shap_additivity_tolerance": 0.00001,
+    "fairness_min_disparate_impact": 0.80
+  },
   "existing_landing_zone": {
     "environment": "dev",
     "region": "asia-southeast1",
@@ -107,6 +118,12 @@
     "vpc_id": "projects/acme-dev01-network/global/networks/acme-shared-vpc",
     "subnet_id": "projects/acme-dev01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
     "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-dev01-data-etl/ingestion-containers",
+    "ds_exp_project_id": "acme-dev01-ds-exp",
+    "ml_ops_project_id": "acme-dev01-ml-ops",
+    "ml_artifact_repo_id": "projects/acme-dev01-ml-ops/locations/asia-southeast1/repositories/ml-models",
+    "ml_audit_dataset_id": "ml_xai_audit",
+    "ml_audit_table_id": "ml_xai_audit_ledger",
+    "ml_worm_bucket_name": "acme-dev01-ml-worm",
     "by_environment": {
       "dev": {
         "core_project_id": "acme-dev01-data-core",
@@ -127,7 +144,11 @@
         "pii_masked_policy_tag_id": "projects/acme-dev01-data-gov/locations/asia-southeast1/taxonomies/1000000001/policyTags/2000000002",
         "vpc_id": "projects/acme-dev01-network/global/networks/acme-shared-vpc",
         "subnet_id": "projects/acme-dev01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
-        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-dev01-data-etl/ingestion-containers"
+        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-dev01-data-etl/ingestion-containers",
+        "ds_exp_project_id": "acme-dev01-ds-exp",
+        "ml_ops_project_id": "acme-dev01-ml-ops",
+        "ml_artifact_repo_id": "projects/acme-dev01-ml-ops/locations/asia-southeast1/repositories/ml-models",
+        "ml_worm_bucket_name": "acme-dev01-ml-worm"
       },
       "staging": {
         "core_project_id": "acme-stg01-data-core",
@@ -148,7 +169,11 @@
         "pii_masked_policy_tag_id": "projects/acme-stg01-data-gov/locations/asia-southeast1/taxonomies/1000000002/policyTags/2000000002",
         "vpc_id": "projects/acme-stg01-network/global/networks/acme-shared-vpc",
         "subnet_id": "projects/acme-stg01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
-        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-stg01-data-etl/ingestion-containers"
+        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-stg01-data-etl/ingestion-containers",
+        "ds_exp_project_id": "acme-stg01-ds-exp",
+        "ml_ops_project_id": "acme-stg01-ml-ops",
+        "ml_artifact_repo_id": "projects/acme-stg01-ml-ops/locations/asia-southeast1/repositories/ml-models",
+        "ml_worm_bucket_name": "acme-stg01-ml-worm"
       },
       "prod": {
         "core_project_id": "acme-prd01-data-core",
@@ -169,7 +194,11 @@
         "pii_masked_policy_tag_id": "projects/acme-prd01-data-gov/locations/asia-southeast1/taxonomies/1000000003/policyTags/2000000002",
         "vpc_id": "projects/acme-prd01-network/global/networks/acme-shared-vpc",
         "subnet_id": "projects/acme-prd01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
-        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-prd01-data-etl/ingestion-containers"
+        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/acme-prd01-data-etl/ingestion-containers",
+        "ds_exp_project_id": "acme-prd01-ds-exp",
+        "ml_ops_project_id": "acme-prd01-ml-ops",
+        "ml_artifact_repo_id": "projects/acme-prd01-ml-ops/locations/asia-southeast1/repositories/ml-models",
+        "ml_worm_bucket_name": "acme-prd01-ml-worm"
       }
     }
   }

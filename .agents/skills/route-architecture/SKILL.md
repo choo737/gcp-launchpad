@@ -10,14 +10,16 @@ Follow these steps to route a customer from intake to private template repositor
 ## Step 1: Run Intake Questionnaire
 
 1. Read `README.md` and `QUESTIONNAIRE.md` with the user.
-2. Confirm workload scope across `gcp-foundation`, `gcp-data-ingestion`, and `gcp-data-medallion`.
+2. Confirm workload scope across `gcp-foundation`, `gcp-data-ingestion`, `gcp-data-medallion`, and `gcp-data-science`.
 3. Note planned roadmap templates (`gcp-webapp`, `gcp-adk-agent`) if requested for future phases.
 4. Confirm `adoption_mode`, `compliance_profile`, `primary_region`, `dr_region`, `environments`, `prefix` (`3` to `8` chars), `project_suffix`, `github_owner`, and `ci_identity_mode`.
 5. Collect Pillar 1 `finops` inputs (`create_dedicated_finops_project`, `finops_billing_export_location`, budgets, `budget_thresholds`, `enable_forecasted_threshold`, and `finops_alert_email_addresses`).
 6. Collect Pillar 2 `backup_dr` inputs (`enable_backup_dr`, `backup_enforced_retention_days`, `lock_backup_vault`, `soft_delete_retention_seconds`, `enable_dual_region_gcs`, `gcs_rpo`, `cross_border_dual_region_approved`, and `bq_dr_mode`).
 7. Collect Pillar 3 `ngfw` inputs (`enable_hierarchical_firewall_policy`, `enable_ngfw_standard_rules`, `enable_secure_tags`, and `enable_ngfw_enterprise`).
 8. Collect Pillar 4 `scc` inputs (`scc_tier`, `scc_scope`, `enable_audit_cmek`, `scc_alert_email_addresses`, and `runtime_detectors`).
-9. Never guess org IDs, folder IDs, billing IDs, or project names.
+9. Collect Section 7 `data_science` inputs (`enable_data_science`, `ds_serving_track`, `enable_ds_workbench`, `enable_colab_enterprise`, `enable_online_feature_store`, `xai_audit_retention_days`, `shap_additivity_tolerance`, and `fairness_min_disparate_impact`).
+10. Reject `enable_colab_enterprise = true` under `regulated_fsi_rmit`, and reject `enable_online_feature_store = true` in `asia-southeast2`.
+11. Never guess org IDs, folder IDs, billing IDs, or project names.
 
 ## Step 2: Run Preflight Checks
 
@@ -50,6 +52,6 @@ Confirm `gh repo view` prints `true` for every created repository.
 ## Step 5: Hand Off Context
 
 1. Copy `platform-context.json` into each cloned private repository root.
-2. Open that repository's `QUESTIONNAIRE.md` and `setup-*` skill (`setup-customer-foundation`, `setup-data-ingestion`, or medallion skills).
+2. Open that repository's `QUESTIONNAIRE.md` and `setup-*` skill (`setup-customer-foundation`, `setup-data-ingestion`, `setup-data-science`, or medallion skills).
 3. For `greenfield`, deploy `gcp-foundation` first and run `scripts/link-stages.sh`.
-4. For `brownfield`, generate `stages/enterprise/00_linked.auto.tfvars.json` using `scripts/generate-brownfield-link.py`.
+4. For `brownfield`, generate `stages/enterprise/00_linked.auto.tfvars.json` using `scripts/generate-brownfield-link.py` (`--target ingestion` or `--target data-science`).

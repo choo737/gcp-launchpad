@@ -7,7 +7,8 @@
   "selected_templates": [
     "gcp-foundation",
     "gcp-data-ingestion",
-    "gcp-data-medallion"
+    "gcp-data-medallion",
+    "gcp-data-science"
   ],
   "primary_region": "asia-southeast1",
   "dr_region": "asia-southeast2",
@@ -82,6 +83,16 @@
       "VIRTUAL_MACHINE_THREAT_DETECTION",
       "CLOUD_RUN_THREAT_DETECTION"
     ]
+  },
+  "data_science": {
+    "enable_data_science": true,
+    "ds_serving_track": "both",
+    "enable_ds_workbench": true,
+    "enable_colab_enterprise": false,
+    "enable_online_feature_store": false,
+    "xai_audit_retention_days": 2555,
+    "shap_additivity_tolerance": 0.00001,
+    "fairness_min_disparate_impact": 0.80
   },
   "existing_landing_zone": {}
 }

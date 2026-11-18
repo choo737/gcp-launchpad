@@ -1,5 +1,6 @@
 """Verify gcp-launchpad structure, scripts, schemas, workflows, and prose hygiene."""
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -71,14 +72,43 @@ CANONICAL_README_H2_SECTIONS = [
     "## License",
 ]
 
+# SHA-256 digests of normalized lowercase forbidden customer/internal tokens.
+FORBIDDEN_TOKEN_SHA256 = frozenset({
+    "28a6c9ad99acc2abeef4831da37cf37001345f05fa7327562ee4a9b167019b04",
+    "bf2e17a1a6bc6728a531b1f29fc3e9344836b4ee2dbc4826d52e7fad1ab903b4",
+    "a1ff4908fbe5168909d20652cd786c91f25e62668cb7704e00b76b48bbd77061",
+    "39c55727348dc27b1dfcca0c18ef5b993b5c5d05c35e84dda10667ffbf4901dd",
+    "b39879ae27ef3ea552c5b1ef0d2e27d31e1e86fd9000f8e790efac1d4d66993b",
+    "f7bed5a9de858cf4a466529421cb2394beafac86339684ef34b831877a0ae5d9",
+    "cfb193f5ee1e7027fe5cfaaac3069069112470cd1de7dde83c109cfadd078f5a",
+    "7ce3b7e784772b32867cef471271a3ddf571d4197f8e0a948d9106fa8470b2fe",
+    "d43e610ed1d8b1bdf2fc1d636d5db802e331d6c3e8467e65f26b1ed874f5ad55",
+    "05bc6fa1ff0770f5de13c86f1d27418c938adea2dac09bf99680e8c31bf89c1c",
+    "8d2d5be141e37e13f3eaa4a427c1c998eb2f3f9d66d22bb85322e4f5e1cc65f5",
+    "ff395a42edbe5317b427b2d700de5be8c6452880ba9a46f66391de6907b887b2",
+    "bcaeb7aaf13db3381e1c0c07ca7d7c9e0b58bb1a77aa177c420d9ddc1f42b72f",
+    "eadba710424a7ccf76ee3a5b175ea916c5095c23e0c9eb73cd06e0bd391a88de",
+    "ea3b268fa7164cf31bb5a5b7d5a70a1da3411e7d2bb36734dca05bd4d97e611d",
+    "fc3fcf326138c3a556919d0e9e38100c7f3d8ead8a6a2f2b80af0bb3bc3e7ad7",
+    "d4d98d8e8d9d1caf68c53b512ffa9add380e62dde5437cf9a3dec954b87e4bd1",
+    "8aabce2e29396d5ce7e7ff8a0c76829c638938d3dd86642dfa8d4f7850492673",
+    "159bc6a26ae434afaf52019da41182f185220ad04d4a330e4cd42c631f58adf8",
+    "49abed4953748a8a9a8295f28fe864af4ce0d856e0fa9f69ee1a4463cb246239",
+    "13ed7955a8035437bf820cb1d940b7c222b86030834d0aecf9333acfa50735b4",
+    "4e41237f5f263ce5dc9566a6ba831e3b732297c006415ec51c16b440d4e7c962",
+    "b0b70f066e82230c9ae95610a7aeec44a28f8cf4c6d2edb1e4e231027055469f",
+    "d599e93c589788ef7cf53ec1c648cc1c64244ce66b8d1785aa5b7293a8d97a68",
+    "42db212c2a8ab6fe26978fadcba7c6f3c8c9ae7a81a7af34930ca174fede649b",
+    "4c77cac1139b0f6d8f1811079c7e14daf82696b71a8804722e9fc44a509c1fc4",
+    "188e6a694d69c6728ad7ea2ba5b5553dda27478b1bc2e4bb7cc50850280742bd",
+    "c4c86be45204a944b7d1ffe6d5adec4f8bdfb7784b45b6c24d78f6e3ed9bccca",
+    "133937e4fbee1a2cc88b809af2ff3ff8a964a8f4c6cd5996af6d49b10c50d203",
+})
+
 LEAKED_IDENTIFIERS = (
-    "jacky" + "choo",
-    "alto" + "strat",
+    "/usr/local/" + "google/home/",
     "@" + "google.com",
     ".c.googlers." + "com",
-    "playground-" + "473704",
-    "016" + "D20",
-    "C01" + "hil3w1",
 )
 
 SECRET_PATTERNS = (
@@ -154,6 +184,7 @@ BULLET_PREFIX_RE = re.compile(r"^(?:[-*]|\d+\.)\s+")
 MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 ABBREV_DOT_RE = re.compile(r"\b(e|i)\.g\.", re.IGNORECASE)
 TABLE_SEP_CELL_RE = re.compile(r"^:?-{3,}:?$")
+WORD_TOKEN_RE = re.compile(r"[A-Za-z0-9_'-]+")
 
 
 def _strip_md_links(text: str) -> str:
@@ -322,6 +353,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "gcp-foundation",
             "gcp-data-ingestion",
             "gcp-data-medallion",
+            "gcp-data-science",
             "gcp-webapp",
             "gcp-adk-agent",
         )
@@ -507,6 +539,44 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 }
                 self.assertTrue(set(scc["runtime_detectors"]).issubset(allowed_detectors))
 
+                ds = payload["data_science"]
+                self.assertEqual(
+                    set(ds.keys()),
+                    {
+                        "enable_data_science",
+                        "ds_serving_track",
+                        "enable_ds_workbench",
+                        "enable_colab_enterprise",
+                        "enable_online_feature_store",
+                        "xai_audit_retention_days",
+                        "shap_additivity_tolerance",
+                        "fairness_min_disparate_impact",
+                    },
+                )
+                for ds_bool_key in (
+                    "enable_data_science",
+                    "enable_ds_workbench",
+                    "enable_colab_enterprise",
+                    "enable_online_feature_store",
+                ):
+                    self.assertIsInstance(ds[ds_bool_key], bool)
+                self.assertIn(
+                    ds["ds_serving_track"],
+                    ("bqml_batch", "vertex_cpr_online", "both"),
+                )
+                self.assertIsInstance(ds["xai_audit_retention_days"], int)
+                self.assertNotIsInstance(ds["xai_audit_retention_days"], bool)
+                self.assertGreater(ds["xai_audit_retention_days"], 0)
+                self.assertIsInstance(ds["shap_additivity_tolerance"], (int, float))
+                self.assertNotIsInstance(ds["shap_additivity_tolerance"], bool)
+                self.assertGreater(ds["shap_additivity_tolerance"], 0)
+                self.assertLessEqual(ds["shap_additivity_tolerance"], 0.001)
+                self.assertIsInstance(ds["fairness_min_disparate_impact"], (int, float))
+                self.assertNotIsInstance(ds["fairness_min_disparate_impact"], bool)
+                self.assertGreater(ds["fairness_min_disparate_impact"], 0.0)
+                self.assertLessEqual(ds["fairness_min_disparate_impact"], 1.0)
+                self.assertIn("gcp-data-science", payload["selected_templates"])
+
         gf = json.loads(
             (REPO_ROOT / "examples" / "platform-context.greenfield.json").read_text(
                 encoding="utf-8"
@@ -525,6 +595,14 @@ class LaunchpadIntegrityTest(unittest.TestCase):
         self.assertFalse(gf["ngfw"]["enable_ngfw_enterprise"])
         self.assertEqual(gf["scc"]["scc_tier"], "PREMIUM")
         self.assertIn("VIRTUAL_MACHINE_THREAT_DETECTION", gf["scc"]["runtime_detectors"])
+        self.assertTrue(gf["data_science"]["enable_data_science"])
+        self.assertEqual(gf["data_science"]["ds_serving_track"], "both")
+        self.assertTrue(gf["data_science"]["enable_ds_workbench"])
+        self.assertFalse(gf["data_science"]["enable_colab_enterprise"])
+        self.assertFalse(gf["data_science"]["enable_online_feature_store"])
+        self.assertEqual(gf["data_science"]["xai_audit_retention_days"], 2555)
+        self.assertEqual(gf["data_science"]["shap_additivity_tolerance"], 0.00001)
+        self.assertEqual(gf["data_science"]["fairness_min_disparate_impact"], 0.80)
 
         bf = json.loads(
             (REPO_ROOT / "examples" / "platform-context.brownfield.json").read_text(
@@ -541,7 +619,27 @@ class LaunchpadIntegrityTest(unittest.TestCase):
         self.assertFalse(bf["backup_dr"]["enable_dual_region_gcs"])
         self.assertFalse(bf["ngfw"]["enable_ngfw_enterprise"])
         self.assertEqual(bf["scc"]["scc_tier"], "STANDARD")
-        for key in ("finops_project_id", "backup_project_id", "backup_vault_id", "by_environment"):
+        self.assertTrue(bf["data_science"]["enable_data_science"])
+        self.assertEqual(bf["data_science"]["ds_serving_track"], "vertex_cpr_online")
+        self.assertFalse(bf["data_science"]["enable_ds_workbench"])
+        self.assertFalse(bf["data_science"]["enable_colab_enterprise"])
+        self.assertTrue(bf["data_science"]["enable_online_feature_store"])
+        self.assertEqual(bf["data_science"]["xai_audit_retention_days"], 365)
+        self.assertEqual(bf["data_science"]["shap_additivity_tolerance"], 0.00001)
+        self.assertEqual(bf["data_science"]["fairness_min_disparate_impact"], 0.80)
+        for key in (
+            "finops_project_id",
+            "backup_project_id",
+            "backup_vault_id",
+            "ds_exp_project_id",
+            "ml_ops_project_id",
+            "ml_artifact_repo_id",
+            "ml_audit_dataset_id",
+            "ml_audit_table_id",
+            "ml_worm_bucket_name",
+            "silver_dataset_id",
+            "by_environment",
+        ):
             self.assertIn(key, bf["existing_landing_zone"])
         self.assertEqual(set(bf["existing_landing_zone"]["by_environment"].keys()), {"dev", "staging", "prod"})
 
@@ -575,6 +673,24 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "https://cloud.google.com/storage/sla",
             "https://cloud.google.com/security/products/firewall",
             "https://cloud.google.com/firewall/pricing",
+            "## Section 7: Data Science & Regulated Explainable AI",
+            "gcp-data-science",
+            "ds_serving_track",
+            "bqml_batch",
+            "vertex_cpr_online",
+            "ML.EXPLAIN_PREDICT",
+            "TreeSHAP",
+            "enable_ds_workbench",
+            "enable_colab_enterprise",
+            "enable_online_feature_store",
+            "xai_audit_retention_days",
+            "shap_additivity_tolerance",
+            "fairness_min_disparate_impact",
+            "model-validator",
+            "ml_xai_audit_ledger",
+            "March 2027",
+            "https://cloud.google.com/vertex-ai/docs/deprecations",
+            "https://cloud.google.com/bigquery/docs/xai-overview",
         )
         for token in expected_tokens:
             with self.subTest(token=token):
@@ -1335,13 +1451,13 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                         self.assertNotEqual(type_res.returncode, 0)
                         self.assertIn("ERROR:", type_res.stderr)
 
-    def test_org_scanner_design_covers_d00_through_d15(self) -> None:
+    def test_org_scanner_design_covers_d00_through_d16(self) -> None:
         scanner_doc = (
             REPO_ROOT / "docs" / "03-org-completeness-scanner-design.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("sixteen platform areas (`D00` through `D15`)", scanner_doc)
-        self.assertIn("## 16-Area Control-Plane Checks", scanner_doc)
-        for idx in range(16):
+        self.assertIn("seventeen platform areas (`D00` through `D16`)", scanner_doc)
+        self.assertIn("## 17-Area Control-Plane Checks", scanner_doc)
+        for idx in range(17):
             check_id = f"`D{idx:02d}`"
             with self.subTest(check_id=check_id):
                 self.assertIn(check_id, scanner_doc)
@@ -1351,12 +1467,20 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "soft_delete_policy",
             "GCE_FIREWALL",
             "<prefix>_scc_findings",
+            "Research lab & control tower",
+            "ainotebooks.disableRootAccess",
+            "disableFileDownloads",
+            "explanationSpec",
+            "FeatureOnlineStore",
+            "ml_xai_audit_ledger",
             "roles/billing.viewer",
             "roles/backupdr.viewer",
             "roles/compute.viewer",
             "roles/resourcemanager.tagViewer",
             "roles/monitoring.viewer",
             "roles/securitycenter.adminViewer",
+            "roles/aiplatform.viewer",
+            "roles/notebooks.viewer",
             "Cloud Billing Account",
         ):
             with self.subTest(expected=expected):
@@ -1371,14 +1495,18 @@ class LaunchpadIntegrityTest(unittest.TestCase):
         for expected in (
             "foundation/01-org-governance foundation/02-security-network",
             "foundation/02-security-network data/enterprise/01-platform data/enterprise/02-governance-ops",
+            "data/enterprise/03-data-science",
             "--from-gcs gs://<iac-outputs-bucket>/foundation-outputs.json",
             "--env dev",
+            "--target data-science",
             "stages/enterprise",
+            "gcp-data-science",
             "GCP_WIF_PROVIDER",
             "GCP_WIF_SERVICE_ACCOUNT",
             "GCP_ORG_GOV_WIF_SA",
             "GCP_NET_SEC_WIF_SA",
             "GCP_DATA_PLAT_WIF_SA",
+            "GCP_DS_WIF_SA",
             "<prefix>_ops_telemetry.pipeline_runs",
             "make plan STAGE=<stage> ENV=<env> TFSTATE_BUCKET=<bucket>",
         ):
@@ -1440,6 +1568,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                             self.assertNotIn("${{", line, f"{wf_path.name}: Expression interpolation inside run: block")
 
     def test_no_leaked_identifiers_secrets_or_deprecated_models(self) -> None:
+        alnum_re = re.compile(r"[a-z0-9]+")
         for path in _iter_repo_files():
             text = path.read_text(encoding="utf-8")
             lowered = text.lower()
@@ -1451,6 +1580,13 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                         lowered,
                         f"Leaked identifier '{ident}' found in {rel}",
                     )
+                tokens = alnum_re.findall(lowered)
+                for idx, tok in enumerate(tokens):
+                    digest = hashlib.sha256(tok.encode("utf-8")).hexdigest()
+                    self.assertNotIn(digest, FORBIDDEN_TOKEN_SHA256, f"Forbidden token digest {digest} in {rel}")
+                    if idx + 1 < len(tokens):
+                        pair_digest = hashlib.sha256((tok + tokens[idx + 1]).encode("utf-8")).hexdigest()
+                        self.assertNotIn(pair_digest, FORBIDDEN_TOKEN_SHA256, f"Forbidden token pair digest {pair_digest} in {rel}")
                 for pat in SECRET_PATTERNS:
                     self.assertIsNone(
                         pat.search(text),
@@ -1510,17 +1646,29 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             with self.subTest(markdown=rel):
                 for sentence in sentences:
                     words = [w for w in sentence.split() if w]
+                    tokens = WORD_TOKEN_RE.findall(sentence)
                     self.assertLessEqual(
                         len(words),
                         20,
                         f"Sentence exceeds 20 words ({len(words)}) in {rel}: {sentence}",
                     )
+                    self.assertLessEqual(
+                        len(tokens),
+                        20,
+                        f"Sentence exceeds 20 word tokens ({len(tokens)}) in {rel}: {sentence}",
+                    )
                 for cell in table_cells:
                     words = [w for w in cell.split() if w]
+                    tokens = WORD_TOKEN_RE.findall(cell)
                     self.assertLessEqual(
                         len(words),
                         20,
                         f"Table cell exceeds 20 words ({len(words)}) in {rel}: {cell}",
+                    )
+                    self.assertLessEqual(
+                        len(tokens),
+                        20,
+                        f"Table cell exceeds 20 word tokens ({len(tokens)}) in {rel}: {cell}",
                     )
 
     def test_visual_assets_have_valid_headers(self) -> None:
@@ -1725,6 +1873,246 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 gbl.resolve_env_gcs_uri("gs://cust-iac-outputs/02-security-network-outputs.json", "dev"),
                 "gs://cust-iac-outputs/dev/02-security-network-outputs.json",
             )
+
+    def test_generate_brownfield_link_data_science_and_validation(self) -> None:
+        script = REPO_ROOT / "scripts" / "generate-brownfield-link.py"
+        brownfield_ctx = REPO_ROOT / "examples" / "platform-context.brownfield.json"
+        greenfield_ctx = REPO_ROOT / "examples" / "platform-context.greenfield.json"
+
+        spec = importlib.util.spec_from_file_location("generate_brownfield_link_ds", script)
+        self.assertIsNotNone(spec)
+        assert spec is not None and spec.loader is not None
+        gbl = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gbl)
+
+        expected_ds_vars = {
+            "alert_notification_channel_ids",
+            "bqml_schedule_cron",
+            "core_project_id",
+            "cpr_container_image",
+            "deploy_cpr_model",
+            "domain_name",
+            "ds_exp_project_id",
+            "ds_serving_track",
+            "egress_connector_subnet_id",
+            "enable_bqml_schedule",
+            "enable_online_feature_store",
+            "enable_scorer_service",
+            "environment",
+            "fairness_min_disparate_impact",
+            "feature_group_source_table",
+            "feature_online_store_max_nodes",
+            "feature_online_store_min_nodes",
+            "feature_sync_cron",
+            "kms_key_id",
+            "labels",
+            "manage_kms_iam",
+            "ml_artifact_repo_id",
+            "ml_audit_dataset_id",
+            "ml_audit_table_id",
+            "ml_ops_project_id",
+            "ml_worm_bucket_name",
+            "prefix",
+            "region",
+            "scorer_container_image",
+            "shap_additivity_tolerance",
+            "silver_dataset_id",
+            "vpc_id",
+        }
+        self.assertEqual(len(gbl.DATA_SCIENCE_DECLARED_VARS), 32)
+        self.assertEqual(gbl.DATA_SCIENCE_DECLARED_VARS, expected_ds_vars)
+
+        ds_vars_tf = (
+            REPO_ROOT.parent / "gcp-data-science" / "stages" / "enterprise" / "variables.tf"
+        )
+        if ds_vars_tf.is_file():
+            declared_ds_vars = set(
+                re.findall(
+                    r'^\s*variable\s+"([A-Za-z0-9_]+)"\s*\{',
+                    ds_vars_tf.read_text(encoding="utf-8"),
+                    re.MULTILINE,
+                )
+            )
+            self.assertEqual(gbl.DATA_SCIENCE_DECLARED_VARS, declared_ds_vars)
+
+        # Verify greenfield context passes validate_data_science_config directly.
+        gf_payload = json.loads(greenfield_ctx.read_text(encoding="utf-8"))
+        gbl.validate_data_science_config(gf_payload)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            out_file = tmp_root / "ds_linked.auto.tfvars.json"
+
+            # Verify --target data-science --no-manage-kms-iam --print-kms-commands.
+            ds_res = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--context",
+                    str(brownfield_ctx),
+                    "--target",
+                    "data-science",
+                    "--no-manage-kms-iam",
+                    "--print-kms-commands",
+                    "--output",
+                    str(out_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(ds_res.returncode, 0, ds_res.stderr)
+            self.assertEqual(stat.S_IMODE(out_file.stat().st_mode), 0o600)
+            ds_linked = json.loads(out_file.read_text(encoding="utf-8"))
+            self.assertEqual(
+                set(ds_linked.keys()),
+                {
+                    "core_project_id",
+                    "ds_exp_project_id",
+                    "ds_serving_track",
+                    "enable_online_feature_store",
+                    "environment",
+                    "fairness_min_disparate_impact",
+                    "kms_key_id",
+                    "manage_kms_iam",
+                    "ml_artifact_repo_id",
+                    "ml_audit_dataset_id",
+                    "ml_audit_table_id",
+                    "ml_ops_project_id",
+                    "ml_worm_bucket_name",
+                    "prefix",
+                    "region",
+                    "shap_additivity_tolerance",
+                    "silver_dataset_id",
+                    "vpc_id",
+                },
+            )
+            self.assertEqual(ds_linked["ds_exp_project_id"], "acme-dev01-ds-exp")
+            self.assertEqual(ds_linked["ml_ops_project_id"], "acme-dev01-ml-ops")
+            self.assertEqual(ds_linked["ds_serving_track"], "vertex_cpr_online")
+            self.assertIs(ds_linked["enable_online_feature_store"], True)
+            self.assertEqual(ds_linked["shap_additivity_tolerance"], 0.00001)
+            self.assertEqual(ds_linked["fairness_min_disparate_impact"], 0.80)
+            self.assertIs(ds_linked["manage_kms_iam"], False)
+            self.assertNotIn("bronze_dataset_id", ds_linked)
+            self.assertNotIn("landing_bucket_name", ds_linked)
+
+            for expected_cmd in (
+                "ML_OPS_PROJECT_NUMBER=\"$(gcloud projects describe 'acme-dev01-ml-ops' --format='value(projectNumber)')\"",
+                "DS_EXP_PROJECT_NUMBER=\"$(gcloud projects describe 'acme-dev01-ds-exp' --format='value(projectNumber)')\"",
+                "gcloud kms keys add-iam-policy-binding data-cmek --project=acme-dev01-data-gov --location=asia-southeast1 --keyring=data-ring",
+                "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com",
+                "serviceAccount:service-${DS_EXP_PROJECT_NUMBER}@gcp-sa-notebooks.iam.gserviceaccount.com",
+            ):
+                self.assertIn(expected_cmd, ds_res.stdout)
+
+            # Verify staging/prod resolution for --target data-science has zero dev01 leaks.
+            for target_env, expected_suffix in (("staging", "stg01"), ("prod", "prd01")):
+                with self.subTest(target_env=target_env):
+                    env_out = tmp_root / f"ds-{target_env}.auto.tfvars.json"
+                    env_res = subprocess.run(
+                        [
+                            sys.executable,
+                            str(script),
+                            "--context",
+                            str(brownfield_ctx),
+                            "--target",
+                            "data-science",
+                            "--env",
+                            target_env,
+                            "--output",
+                            str(env_out),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(env_res.returncode, 0, env_res.stderr)
+                    raw_text = env_out.read_text(encoding="utf-8")
+                    self.assertNotIn("dev01", raw_text)
+                    env_linked = json.loads(raw_text)
+                    self.assertEqual(env_linked["ds_exp_project_id"], f"acme-{expected_suffix}-ds-exp")
+                    self.assertEqual(env_linked["ml_ops_project_id"], f"acme-{expected_suffix}-ml-ops")
+                    self.assertEqual(env_linked["ml_worm_bucket_name"], f"acme-{expected_suffix}-ml-worm")
+
+            # Verify FSI Colab rejection, asia-southeast2 online Feature Store rejection, and FSI retention >= 2555.
+            bad_cases = [
+                (
+                    "fsi_colab_true",
+                    {
+                        "compliance_profile": "regulated_fsi_rmit",
+                        "data_science": {**gf_payload["data_science"], "enable_colab_enterprise": True},
+                    },
+                    "enable_colab_enterprise",
+                ),
+                (
+                    "jakarta_online_feature_store",
+                    {
+                        "primary_region": "asia-southeast2",
+                        "data_science": {**gf_payload["data_science"], "enable_online_feature_store": True},
+                    },
+                    "asia-southeast2",
+                ),
+                (
+                    "fsi_low_retention",
+                    {
+                        "compliance_profile": "regulated_fsi_rmit",
+                        "data_science": {**gf_payload["data_science"], "xai_audit_retention_days": 365},
+                    },
+                    "2555",
+                ),
+                (
+                    "bad_shap_tolerance",
+                    {
+                        "data_science": {**gf_payload["data_science"], "shap_additivity_tolerance": 0.01},
+                    },
+                    "shap_additivity_tolerance",
+                ),
+                (
+                    "bad_disparate_impact",
+                    {
+                        "data_science": {**gf_payload["data_science"], "fairness_min_disparate_impact": 1.2},
+                    },
+                    "fairness_min_disparate_impact",
+                ),
+                (
+                    "bad_serving_track",
+                    {
+                        "data_science": {**gf_payload["data_science"], "ds_serving_track": "legacy_explain"},
+                    },
+                    "ds_serving_track",
+                ),
+                (
+                    "extra_ds_key",
+                    {
+                        "data_science": {**gf_payload["data_science"], "extra_key": True},
+                    },
+                    "Invalid data_science keys",
+                ),
+            ]
+            base_bf = json.loads(brownfield_ctx.read_text(encoding="utf-8"))
+            for label, overrides, expected_err in bad_cases:
+                with self.subTest(bad_case=label):
+                    bad_ctx = tmp_root / f"{label}.json"
+                    payload = {**base_bf, **overrides}
+                    bad_ctx.write_text(json.dumps(payload), encoding="utf-8")
+                    err_res = subprocess.run(
+                        [
+                            sys.executable,
+                            str(script),
+                            "--context",
+                            str(bad_ctx),
+                            "--target",
+                            "data-science",
+                            "--output",
+                            str(out_file),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(err_res.returncode, 0)
+                    self.assertIn(expected_err, err_res.stderr)
 
 
 if __name__ == "__main__":
