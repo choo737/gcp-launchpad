@@ -541,6 +541,8 @@ def resolve_env_gcs_uri(uri: str, env: str) -> str:
     obj = obj.lstrip("/")
     if not obj:
         return f"gs://{bucket}/{env}/foundation-outputs.json"
+    if obj == "shared" or obj.startswith("shared/"):
+        return uri
     parts = obj.split("/")
     filename = parts[-1]
     if env in parts[:-1]:
@@ -577,21 +579,25 @@ def format_kms_binding_commands(values: dict[str, object]) -> list[str]:
         prefix = values.get("prefix") if isinstance(values.get("prefix"), str) and values.get("prefix") else "ent"
         batch_sa = f"{prefix}-batch-loader@{compute_project}.iam.gserviceaccount.com"
 
+    commands = [
+        f"COMPUTE_PROJECT_NUMBER=\"$(gcloud projects describe '{compute_project}' --format='value(projectNumber)')\""
+    ]
     members = [
-        "serviceAccount:service-<COMPUTE_PROJECT_NUMBER>@gcp-sa-pubsub.iam.gserviceaccount.com",
-        "serviceAccount:service-<COMPUTE_PROJECT_NUMBER>@gcp-sa-datastream.iam.gserviceaccount.com",
-        "serviceAccount:service-<COMPUTE_PROJECT_NUMBER>@gcp-sa-workflows.iam.gserviceaccount.com",
-        "serviceAccount:service-<COMPUTE_PROJECT_NUMBER>@serverless-robot-prod.iam.gserviceaccount.com",
+        "serviceAccount:service-${COMPUTE_PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com",
+        "serviceAccount:service-${COMPUTE_PROJECT_NUMBER}@gcp-sa-datastream.iam.gserviceaccount.com",
+        "serviceAccount:service-${COMPUTE_PROJECT_NUMBER}@gcp-sa-workflows.iam.gserviceaccount.com",
+        "serviceAccount:service-${COMPUTE_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com",
         f"serviceAccount:{batch_sa}",
     ]
-    return [
+    commands.extend(
         (
             f"gcloud kms keys add-iam-policy-binding {kms_key} "
             f"--project={kms_project} --location={kms_location} --keyring={kms_keyring} "
             f"--member={member} --role=roles/cloudkms.cryptoKeyEncrypterDecrypter"
         )
         for member in members
-    ]
+    )
+    return commands
 
 
 def build_linked_tfvars(

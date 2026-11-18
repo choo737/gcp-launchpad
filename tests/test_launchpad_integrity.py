@@ -1376,6 +1376,9 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "stages/enterprise",
             "GCP_WIF_PROVIDER",
             "GCP_WIF_SERVICE_ACCOUNT",
+            "GCP_ORG_GOV_WIF_SA",
+            "GCP_NET_SEC_WIF_SA",
+            "GCP_DATA_PLAT_WIF_SA",
             "<prefix>_ops_telemetry.pipeline_runs",
             "make plan STAGE=<stage> ENV=<env> TFSTATE_BUCKET=<bucket>",
         ):
@@ -1697,14 +1700,31 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             self.assertEqual(json.loads(uploaded.read_text(encoding="utf-8"))["environment"], "staging")
 
             for expected_sa in (
+                "COMPUTE_PROJECT_NUMBER=\"$(gcloud projects describe 'acme-stg01-data-etl' --format='value(projectNumber)')\"",
                 "gcloud kms keys add-iam-policy-binding data-cmek --project=acme-stg01-data-gov --location=asia-southeast1 --keyring=data-ring",
-                "@gcp-sa-pubsub.iam.gserviceaccount.com",
-                "@gcp-sa-datastream.iam.gserviceaccount.com",
-                "@gcp-sa-workflows.iam.gserviceaccount.com",
-                "@serverless-robot-prod.iam.gserviceaccount.com",
+                "service-${COMPUTE_PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com",
+                "service-${COMPUTE_PROJECT_NUMBER}@gcp-sa-datastream.iam.gserviceaccount.com",
+                "service-${COMPUTE_PROJECT_NUMBER}@gcp-sa-workflows.iam.gserviceaccount.com",
+                "service-${COMPUTE_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com",
                 "sa-batch-loader@acme-stg01-data-etl.iam.gserviceaccount.com",
             ):
                 self.assertIn(expected_sa, exp_res.stdout)
+            self.assertNotIn("<COMPUTE_PROJECT_NUMBER>", exp_res.stdout)
+
+            # Verify resolve_env_gcs_uri preserves shared/ paths across environments.
+            spec = importlib.util.spec_from_file_location("generate_brownfield_link_shared", script)
+            self.assertIsNotNone(spec)
+            assert spec is not None and spec.loader is not None
+            gbl = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(gbl)
+            self.assertEqual(
+                gbl.resolve_env_gcs_uri("gs://cust-iac-outputs/shared/01-org-governance-outputs.json", "dev"),
+                "gs://cust-iac-outputs/shared/01-org-governance-outputs.json",
+            )
+            self.assertEqual(
+                gbl.resolve_env_gcs_uri("gs://cust-iac-outputs/02-security-network-outputs.json", "dev"),
+                "gs://cust-iac-outputs/dev/02-security-network-outputs.json",
+            )
 
 
 if __name__ == "__main__":

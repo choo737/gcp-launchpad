@@ -52,6 +52,9 @@ Complete architecture intake and create isolated private repositories before pro
 | --- | --- | --- |
 | `GCP_WIF_PROVIDER` | Repo / Environment | Keyless OIDC provider resource path |
 | `GCP_WIF_SERVICE_ACCOUNT` | Repo / Environment | Service account email impersonated via WIF |
+| `GCP_ORG_GOV_WIF_SA` | Repo / `shared` | Optional Tier-L WIF SA for `01-org-governance` |
+| `GCP_NET_SEC_WIF_SA` | Repo / Environment | Optional Tier-L WIF SA for `02-security-network` |
+| `GCP_DATA_PLAT_WIF_SA` | Repo / Environment | Optional Tier-L WIF SA for `data/enterprise/*` |
 | `GCP_TFSTATE_BUCKET` | Repo / Environment | Remote GCS Terraform state bucket |
 | `IAC_OUTPUTS_BUCKET` | Repo / Environment | Non-sensitive `foundation-outputs.json` GCS bucket |
 | `ARTIFACT_REGISTRY_REPOSITORY` | Repo / Environment | Container registry path for `gcs_to_bronze` |
