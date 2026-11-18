@@ -17,6 +17,14 @@ Which template capabilities do you need today?
 | Brownfield Ingestion + Medallion | `gcp-data-ingestion` + `gcp-data-medallion` | Brownfield |
 | Medallion Only on Existing Bronze | `gcp-data-medallion` | Brownfield |
 
+### Team Size Tier (`team_size_tier`)
+
+Select `"S"`, `"M"`, or `"L"` to set CI separation and business-unit namespacing.
+
+- **`"S"` (Pilot)**: Single deployer SA for small teams (`1-5` engineers).
+- **`"M"` (Growth)**: Separate `tf_foundation_ci`, `tf_ingestion_ci`, and `dataform_ci` identities (`5-20` engineers).
+- **`"L"` (Regulated SoD / Vendor Split)**: Per-stage foundation SAs (`org_gov_ci`, `net_sec_ci`, `data_plat_ci`) and `domain_name` namespaces.
+
 ## Section 2: Landing Zone Mode
 
 Choose how your Google Cloud organization, network, and encryption keys are provisioned.
@@ -66,6 +74,7 @@ Protect stateful storage, BigQuery datasets, and compliance recovery objectives.
 - **GCS `soft_delete_policy` (`soft_delete_retention_seconds`)**: Set `1209600` (`14d`) for `enterprise_standard` or `2592000` (`30d`) for `regulated_fsi_rmit`.
 - **Dual-region GCS (`enable_dual_region_gcs`, `gcs_rpo`)**: Choose `DEFAULT` or `ASYNC_TURBO` (15-minute RPO SLA per [Cloud Storage SLA](https://cloud.google.com/storage/sla)).
 - **FSI residency (`cross_border_dual_region_approved`)**: Confirm whether pairing `asia-southeast1` + `asia-southeast2` violates national border rules. Keep regional buckets if restricted.
+- **GCS dual-region exclusions**: GCS excludes `asia-southeast2` and `asia-east2` from `ASIA` dual-regions; pair `["asia-southeast1", "asia-east1"]` or stay regional.
 - **BigQuery DR (`bq_dr_mode`)**: Choose `time_travel_only`, `cross_region_replica` (`ALTER SCHEMA ... ADD REPLICA`), or `enterprise_plus_failover` instead of empty `*_dr` datasets.
 
 ### Pillar 3: Cloud NGFW & Network Security
@@ -110,6 +119,7 @@ Define environment tiers and short naming tokens so GCP project IDs stay within 
 Specify the private GitHub target and CI authentication pattern.
 
 - **`github_owner`**: Target private GitHub organization or owner handle such as `<YOUR_GITHUB_ORG>`.
+- **`github_plan`**: Choose `github_free`, `github_team` (private `CODEOWNERS`), or `github_enterprise` (Environment Required Reviewers).
 - **`ci_identity_mode`**: Choose `github_oidc_wif` for keyless GitHub Workload Identity Federation or `existing_ci_runner`.
 - Always create private repositories with `gh repo create --private` before storing customer values.
 

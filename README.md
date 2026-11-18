@@ -58,6 +58,26 @@ flowchart TD
 - **Brownfield `scripts/generate-brownfield-link.py`**: Skip `gcp-foundation` and write `00_linked.auto.tfvars.json` (`0600`) from existing landing zone IDs.
 - **Single-repo adoption**: Each template keeps its own standalone `QUESTIONNAIRE.md` for direct adoption without `gcp-launchpad`.
 
+### Team Size & Separation of Duties Tiers (`team_size_tier`)
+
+Choose a tier matching team boundaries, GitHub plan features, and regulatory separation rules.
+
+| Tier | Profile | CI Identity Scope | GitHub Plan Gating |
+| --- | --- | --- | --- |
+| `S` | Small pilot (`1-5` engineers) | Single deployer WIF SA across stages | Works on `github_free` (branch rules only) |
+| `M` | Growth (`5-20` engineers) | Scoped `tf_foundation_ci`, `tf_ingestion_ci`, and `dataform_ci` | `github_team` adds private `CODEOWNERS` enforcement |
+| `L` | Regulated SoD + External Vendor Split | Per-stage foundation SAs plus BU `domain_name` namespaces | `github_enterprise` adds Environment Required Reviewers |
+
+- **GitHub Free (`github_free`)**: Lacks private repo `CODEOWNERS` checks and Environment Required Reviewers.
+- **GitHub Team (`github_team`)**: Enables `CODEOWNERS` approval rules on private repositories.
+- **GitHub Enterprise (`github_enterprise`)**: Adds Environment Required Reviewers on `staging` and `prod` deployments.
+
+### Monthly Idle Cost Floor Defaults
+
+- **Zero-idle baseline**: Serverless `dev`/`staging` plus `0` baseline `prod` slots cost `$0/mo` idle.
+- **Slot commitment option**: Opting into `100` baseline slots in `asia-southeast1` costs `$5,365.50/mo` PAYG.
+- **NGFW Enterprise option**: Opting into `enable_ngfw_enterprise = true` adds `$2,555/mo/env` plus inspection charges.
+
 ## 6-Step Enterprise Operationalization
 
 Follow the full cross-repository runbook in [docs/01-end-to-end-operational-playbook.md](docs/01-end-to-end-operational-playbook.md).

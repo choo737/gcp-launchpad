@@ -361,6 +361,8 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "schema_version",
             "adoption_mode",
             "compliance_profile",
+            "team_size_tier",
+            "github_plan",
             "selected_templates",
             "primary_region",
             "dr_region",
@@ -380,6 +382,11 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 self.assertEqual(payload["schema_version"], "1.0")
                 self.assertEqual(payload["adoption_mode"], mode)
                 self.assertTrue(required_keys.issubset(payload.keys()))
+                self.assertIn(payload["team_size_tier"], ("S", "M", "L"))
+                self.assertIn(
+                    payload["github_plan"],
+                    ("github_free", "github_team", "github_enterprise"),
+                )
                 self.assertRegex(payload["prefix"], r"^[a-z][a-z0-9-]{1,6}[a-z0-9]$")
                 self.assertIn(payload["ci_identity_mode"], ("github_oidc_wif", "existing_ci_runner"))
                 self.assertIsInstance(payload["selected_templates"], list)
@@ -506,12 +513,16 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             )
         )
         self.assertEqual(gf["compliance_profile"], "regulated_fsi_rmit")
+        self.assertEqual(gf["team_size_tier"], "L")
+        self.assertEqual(gf["github_plan"], "github_enterprise")
         self.assertTrue(gf["finops"]["create_dedicated_finops_project"])
+        self.assertFalse(gf["backup_dr"]["enable_backup_dr"])
         self.assertEqual(gf["backup_dr"]["backup_enforced_retention_days"], 30)
         self.assertFalse(gf["backup_dr"]["lock_backup_vault"])
         self.assertEqual(gf["backup_dr"]["soft_delete_retention_seconds"], 2592000)
-        self.assertTrue(gf["backup_dr"]["enable_dual_region_gcs"])
-        self.assertTrue(gf["ngfw"]["enable_ngfw_enterprise"])
+        self.assertFalse(gf["backup_dr"]["enable_dual_region_gcs"])
+        self.assertEqual(gf["backup_dr"]["gcs_rpo"], "DEFAULT")
+        self.assertFalse(gf["ngfw"]["enable_ngfw_enterprise"])
         self.assertEqual(gf["scc"]["scc_tier"], "PREMIUM")
         self.assertIn("VIRTUAL_MACHINE_THREAT_DETECTION", gf["scc"]["runtime_detectors"])
 
@@ -521,6 +532,8 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             )
         )
         self.assertEqual(bf["compliance_profile"], "enterprise_standard")
+        self.assertEqual(bf["team_size_tier"], "M")
+        self.assertEqual(bf["github_plan"], "github_team")
         self.assertTrue(bf["finops"]["create_dedicated_finops_project"])
         self.assertEqual(bf["backup_dr"]["backup_enforced_retention_days"], 14)
         self.assertFalse(bf["backup_dr"]["lock_backup_vault"])
@@ -799,6 +812,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 "pubsub_writer_sa_email",
                 "kms_key_id",
                 "kms_key_name",
+                "manage_kms_iam",
                 "pii_restricted_policy_tag_id",
                 "pii_masked_policy_tag_id",
                 "vpc_id",
@@ -810,6 +824,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 "prefix",
             }
             self.assertEqual(set(linked.keys()), committed_expected_keys)
+            self.assertIs(linked["manage_kms_iam"], False)
 
             spec = importlib.util.spec_from_file_location("generate_brownfield_link", script)
             self.assertIsNotNone(spec)
@@ -821,7 +836,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             foundation_only_fields = frozenset(
                 {"finops_project_id", "backup_project_id", "backup_vault_id"}
             )
-            self.assertEqual(len(gbl.INGESTION_DECLARED_VARS), 75)
+            self.assertEqual(len(gbl.INGESTION_DECLARED_VARS), 77)
             self.assertTrue(set(gbl.REQUIRED_FIELDS).issubset(gbl.INGESTION_DECLARED_VARS))
             self.assertTrue(
                 (set(gbl.FIELD_FLAGS) - foundation_only_fields).issubset(
@@ -1523,6 +1538,173 @@ class LaunchpadIntegrityTest(unittest.TestCase):
 
         png_head = png_path.read_bytes()[:8]
         self.assertEqual(png_head, b"\x89PNG\r\n\x1a\n")
+
+    def test_readme_and_questionnaire_tshirt_tiers_github_plan_and_cost_floor(self) -> None:
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        questionnaire = (REPO_ROOT / "QUESTIONNAIRE.md").read_text(encoding="utf-8")
+
+        for token in (
+            "team_size_tier",
+            "github_free",
+            "github_team",
+            "github_enterprise",
+            "$0/mo",
+            "$5,365.50/mo",
+            "$2,555/mo/env",
+            "CODEOWNERS",
+            "Environment Required Reviewers",
+        ):
+            with self.subTest(readme_token=token):
+                self.assertIn(token, readme)
+
+        for token in (
+            "team_size_tier",
+            "github_plan",
+            "github_free",
+            "github_team",
+            "github_enterprise",
+            "asia-east2",
+        ):
+            with self.subTest(questionnaire_token=token):
+                self.assertIn(token, questionnaire)
+
+    def test_generate_brownfield_link_kms_iam_domain_export_gcs_and_print_commands(self) -> None:
+        script = REPO_ROOT / "scripts" / "generate-brownfield-link.py"
+        brownfield_ctx = REPO_ROOT / "examples" / "platform-context.brownfield.json"
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            out_file = tmp_root / "00_linked.auto.tfvars.json"
+
+            # Verify --manage-kms-iam sets true, --no-manage-kms-iam sets false, and --domain-name emits domain_name.
+            res_true = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--context",
+                    str(brownfield_ctx),
+                    "--manage-kms-iam",
+                    "--domain-name",
+                    "retail-pos",
+                    "--output",
+                    str(out_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res_true.returncode, 0, res_true.stderr)
+            linked_true = json.loads(out_file.read_text(encoding="utf-8"))
+            self.assertIs(linked_true["manage_kms_iam"], True)
+            self.assertEqual(linked_true["domain_name"], "retail-pos")
+
+            # Verify context boolean manage_kms_iam = true is preserved and --no-manage-kms-iam overrides it.
+            ctx_true_path = tmp_root / "ctx-kms-true.json"
+            ctx_payload = json.loads(brownfield_ctx.read_text(encoding="utf-8"))
+            ctx_payload["existing_landing_zone"]["manage_kms_iam"] = True
+            ctx_true_path.write_text(json.dumps(ctx_payload), encoding="utf-8")
+
+            res_ctx_true = subprocess.run(
+                [sys.executable, str(script), "--context", str(ctx_true_path), "--output", str(out_file)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res_ctx_true.returncode, 0, res_ctx_true.stderr)
+            self.assertIs(json.loads(out_file.read_text(encoding="utf-8"))["manage_kms_iam"], True)
+
+            res_override_false = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--context",
+                    str(ctx_true_path),
+                    "--no-manage-kms-iam",
+                    "--output",
+                    str(out_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res_override_false.returncode, 0, res_override_false.stderr)
+            self.assertIs(json.loads(out_file.read_text(encoding="utf-8"))["manage_kms_iam"], False)
+
+            # Verify invalid domain_name and invalid --export-gcs fail closed.
+            bad_domain = subprocess.run(
+                [sys.executable, str(script), "--context", str(brownfield_ctx), "--domain-name", "BAD_DOMAIN", "--output", str(out_file)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(bad_domain.returncode, 0)
+
+            for bad_uri in ("", "s3://bucket/a.json", "gs://ab/a.json", "gs://BAD_BUCKET/a.json"):
+                with self.subTest(bad_uri=bad_uri):
+                    bad_gcs = subprocess.run(
+                        [sys.executable, str(script), "--context", str(brownfield_ctx), "--export-gcs", bad_uri, "--output", str(out_file)],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(bad_gcs.returncode, 2, bad_gcs.stderr)
+
+            # Verify --export-gcs resolves env subpath and uploads via gcloud storage cp.
+            bin_dir = tmp_root / "bin"
+            bin_dir.mkdir()
+            gcs_store = tmp_root / "gcs"
+            gcs_store.mkdir()
+            gcloud_shim = bin_dir / "gcloud"
+            gcloud_shim.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os, shutil, sys\n"
+                "from pathlib import Path\n"
+                "store = Path(os.environ['TEST_GCS_STORE'])\n"
+                "args = sys.argv[1:]\n"
+                "assert args[:2] == ['storage', 'cp']\n"
+                "dest = store / args[3].removeprefix('gs://')\n"
+                "dest.parent.mkdir(parents=True, exist_ok=True)\n"
+                "shutil.copyfile(args[2], dest)\n",
+                encoding="utf-8",
+            )
+            gcloud_shim.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = f"{bin_dir}:{env['PATH']}"
+            env["TEST_GCS_STORE"] = str(gcs_store)
+
+            exp_res = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--context",
+                    str(brownfield_ctx),
+                    "--env",
+                    "staging",
+                    "--export-gcs",
+                    "gs://cust-iac-outputs/brownfield.json",
+                    "--print-kms-commands",
+                    "--output",
+                    str(out_file),
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(exp_res.returncode, 0, exp_res.stderr)
+            uploaded = gcs_store / "cust-iac-outputs" / "staging" / "brownfield.json"
+            self.assertTrue(uploaded.is_file())
+            self.assertEqual(json.loads(uploaded.read_text(encoding="utf-8"))["environment"], "staging")
+
+            for expected_sa in (
+                "gcloud kms keys add-iam-policy-binding data-cmek --project=acme-stg01-data-gov --location=asia-southeast1 --keyring=data-ring",
+                "@gcp-sa-pubsub.iam.gserviceaccount.com",
+                "@gcp-sa-datastream.iam.gserviceaccount.com",
+                "@gcp-sa-workflows.iam.gserviceaccount.com",
+                "@serverless-robot-prod.iam.gserviceaccount.com",
+                "sa-batch-loader@acme-stg01-data-etl.iam.gserviceaccount.com",
+            ):
+                self.assertIn(expected_sa, exp_res.stdout)
 
 
 if __name__ == "__main__":

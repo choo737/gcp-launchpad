@@ -2,6 +2,8 @@
   "schema_version": "1.0",
   "adoption_mode": "brownfield",
   "compliance_profile": "enterprise_standard",
+  "team_size_tier": "M",
+  "github_plan": "github_team",
   "selected_templates": [
     "gcp-data-ingestion",
     "gcp-data-medallion"

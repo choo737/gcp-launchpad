@@ -2,6 +2,8 @@
   "schema_version": "1.0",
   "adoption_mode": "greenfield",
   "compliance_profile": "regulated_fsi_rmit",
+  "team_size_tier": "L",
+  "github_plan": "github_enterprise",
   "selected_templates": [
     "gcp-foundation",
     "gcp-data-ingestion",
@@ -52,12 +54,12 @@
     ]
   },
   "backup_dr": {
-    "enable_backup_dr": true,
+    "enable_backup_dr": false,
     "backup_enforced_retention_days": 30,
     "lock_backup_vault": false,
     "soft_delete_retention_seconds": 2592000,
-    "enable_dual_region_gcs": true,
-    "gcs_rpo": "ASYNC_TURBO",
+    "enable_dual_region_gcs": false,
+    "gcs_rpo": "DEFAULT",
     "cross_border_dual_region_approved": true,
     "bq_dr_mode": "cross_region_replica"
   },
@@ -65,7 +67,7 @@
     "enable_hierarchical_firewall_policy": true,
     "enable_ngfw_standard_rules": true,
     "enable_secure_tags": true,
-    "enable_ngfw_enterprise": true
+    "enable_ngfw_enterprise": false
   },
   "scc": {
     "scc_tier": "PREMIUM",

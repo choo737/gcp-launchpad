@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -16,6 +18,8 @@ DATASET_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 BUCKET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$")
 ENVIRONMENT_RE = re.compile(r"^(dev|staging|prod)$")
 PREFIX_RE = re.compile(r"^[a-z][a-z0-9-]{1,6}[a-z0-9]$")
+DOMAIN_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,19}[a-z0-9]$")
+GCS_URI_RE = re.compile(r"^gs://[a-z0-9][a-z0-9._-]{1,61}[a-z0-9](/.*)?$")
 REGION_RE = re.compile(r"^[a-z]+-[a-z]+[0-9]+$")
 DATAFORM_SHORT_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 DATAFORM_PATH_RE = re.compile(
@@ -30,7 +34,7 @@ DATAPLEX_SCAN_PATH_RE = re.compile(
 )
 SA_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 KMS_KEY_RE = re.compile(
-    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/keyRings/[A-Za-z0-9._-]+/cryptoKeys/[A-Za-z0-9._-]+$"
+    r"^projects/([a-z][a-z0-9-]{4,28}[a-z0-9])/locations/([a-z0-9-]+)/keyRings/([A-Za-z0-9._-]+)/cryptoKeys/([A-Za-z0-9._-]+)$"
 )
 VPC_ID_RE = re.compile(
     r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/global/networks/[A-Za-z0-9._-]+$"
@@ -93,7 +97,10 @@ FIELD_FLAGS = (
     "region",
     "environment",
     "prefix",
+    "domain_name",
 )
+
+BOOLEAN_LANDING_ZONE_KEYS = frozenset({"manage_kms_iam"})
 
 ALIAS_PAIRS = (
     ("core_project_id", "core_storage_project_id"),
@@ -107,7 +114,9 @@ ALIAS_PAIRS = (
 )
 
 ALIAS_RHS_TO_LHS = {alias: primary for primary, alias in ALIAS_PAIRS}
-VALID_LANDING_ZONE_KEYS = frozenset(FIELD_FLAGS) | frozenset(ALIAS_RHS_TO_LHS)
+VALID_LANDING_ZONE_KEYS = (
+    frozenset(FIELD_FLAGS) | frozenset(ALIAS_RHS_TO_LHS) | BOOLEAN_LANDING_ZONE_KEYS
+)
 
 # Mirrors gcp-data-ingestion/stages/enterprise/variables.tf so unfiltered
 # output never emits foundation-only keys (for example finops_project_id).
@@ -141,6 +150,7 @@ INGESTION_DECLARED_VARS = frozenset({
     "dataplex_quality_scan_id",
     "kms_key_id",
     "kms_key_name",
+    "manage_kms_iam",
     "pii_restricted_policy_tag_id",
     "pii_masked_policy_tag_id",
     "vpc_id",
@@ -154,6 +164,7 @@ INGESTION_DECLARED_VARS = frozenset({
     "region",
     "environment",
     "prefix",
+    "domain_name",
     "delete_contents_on_destroy",
     "enable_pubsub_stream",
     "pubsub_schema_type",
@@ -215,6 +226,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         flag = "--" + alias.replace("_", "-")
         parser.add_argument(flag, dest=alias, default=None)
     parser.add_argument(
+        "--manage-kms-iam",
+        dest="manage_kms_iam",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Whether Terraform manages Cloud KMS IAM bindings (defaults false when kms_key_id is set).",
+    )
+    parser.add_argument(
+        "--export-gcs",
+        dest="export_gcs",
+        default=None,
+        help="Optional gs://<bucket>/<path>.json URI to upload generated tfvars JSON.",
+    )
+    parser.add_argument(
+        "--print-kms-commands",
+        action="store_true",
+        help="Print gcloud kms keys add-iam-policy-binding commands for customer KMS admins.",
+    )
+    parser.add_argument(
         "--target-variables-tf",
         type=Path,
         default=None,
@@ -269,8 +298,8 @@ def _validate_environment(value: str) -> None:
 
 def _normalize_landing_zone_with_unsets(
     mapping: dict[object, object], context_label: str
-) -> tuple[dict[str, str], set[str]]:
-    cleaned: dict[str, str] = {}
+) -> tuple[dict[str, object], set[str]]:
+    cleaned: dict[str, object] = {}
     unset_keys: set[str] = set()
     for key, raw_val in mapping.items():
         if not isinstance(key, str) or key not in VALID_LANDING_ZONE_KEYS:
@@ -278,6 +307,13 @@ def _normalize_landing_zone_with_unsets(
         canonical = ALIAS_RHS_TO_LHS.get(key, key)
         if raw_val is None:
             unset_keys.add(canonical)
+            continue
+        if canonical in BOOLEAN_LANDING_ZONE_KEYS:
+            if not isinstance(raw_val, bool):
+                raise ValueError(
+                    f"{context_label}.{key} must be a boolean, got {type(raw_val).__name__}"
+                )
+            cleaned[key] = raw_val
             continue
         if not isinstance(raw_val, str):
             raise ValueError(
@@ -295,7 +331,7 @@ def _normalize_landing_zone_with_unsets(
                 f"Conflicting values for {primary} and alias {alias} in {context_label}"
             )
 
-    normalized: dict[str, str] = {}
+    normalized: dict[str, object] = {}
     for key, val in cleaned.items():
         canonical = ALIAS_RHS_TO_LHS.get(key, key)
         unset_keys.discard(canonical)
@@ -306,14 +342,14 @@ def _normalize_landing_zone_with_unsets(
 
 def _normalize_landing_zone_dict(
     mapping: dict[object, object], context_label: str
-) -> dict[str, str]:
+) -> dict[str, object]:
     normalized, _ = _normalize_landing_zone_with_unsets(mapping, context_label)
     return normalized
 
 
 def load_context_values(
     context_path: Path, target_env: str | None = None
-) -> dict[str, str]:
+) -> dict[str, object]:
     if not context_path.is_file():
         raise FileNotFoundError(f"Context file not found: {context_path}")
     payload = json.loads(context_path.read_text(encoding="utf-8"))
@@ -323,7 +359,7 @@ def load_context_values(
     if target_env is not None:
         _validate_environment(target_env)
 
-    values: dict[str, str] = {}
+    values: dict[str, object] = {}
     landing_zone = payload.get("existing_landing_zone")
     if landing_zone is not None:
         if not isinstance(landing_zone, dict):
@@ -339,7 +375,7 @@ def load_context_values(
                     "existing_landing_zone.by_environment must be a non-empty JSON object."
                 )
 
-            normalized_by_env: dict[str, tuple[dict[str, str], set[str]]] = {}
+            normalized_by_env: dict[str, tuple[dict[str, object], set[str]]] = {}
             for env_key, env_obj in by_env.items():
                 if not isinstance(env_key, str) or not ENVIRONMENT_RE.match(env_key):
                     raise ValueError(
@@ -399,7 +435,7 @@ def load_context_values(
     return values
 
 
-def validate_inputs(values: dict[str, str]) -> None:
+def validate_inputs(values: dict[str, object]) -> None:
     for required in REQUIRED_FIELDS:
         if not values.get(required):
             raise ValueError(f"Missing required brownfield field: {required}")
@@ -413,8 +449,9 @@ def validate_inputs(values: dict[str, str]) -> None:
         "finops_project_id",
         "backup_project_id",
     ):
-        if values.get(field):
-            _validate_pattern(field, values[field], PROJECT_ID_RE)
+        val = values.get(field)
+        if isinstance(val, str) and val:
+            _validate_pattern(field, val, PROJECT_ID_RE)
 
     for field in (
         "bronze_dataset_id",
@@ -424,77 +461,145 @@ def validate_inputs(values: dict[str, str]) -> None:
         "assertions_dataset_id",
         "ops_telemetry_dataset_id",
     ):
-        if values.get(field):
-            _validate_pattern(field, values[field], DATASET_ID_RE)
+        val = values.get(field)
+        if isinstance(val, str) and val:
+            _validate_pattern(field, val, DATASET_ID_RE)
 
     _validate_pattern(
-        "landing_bucket_name", values["landing_bucket_name"], BUCKET_NAME_RE
+        "landing_bucket_name", str(values["landing_bucket_name"]), BUCKET_NAME_RE
     )
-    _validate_dataform_repository(values["dataform_repository_name"])
+    _validate_dataform_repository(str(values["dataform_repository_name"]))
 
     if values.get("dataform_release_config_name"):
-        _validate_release_config(values["dataform_release_config_name"])
+        _validate_release_config(str(values["dataform_release_config_name"]))
 
     for scan_field in ("dataplex_profile_scan_id", "dataplex_quality_scan_id"):
-        if values.get(scan_field):
-            _validate_dataplex_scan(scan_field, values[scan_field])
+        val = values.get(scan_field)
+        if isinstance(val, str) and val:
+            _validate_dataplex_scan(scan_field, val)
 
     for field in (
         "dataform_sa_email",
         "batch_loader_sa_email",
         "pubsub_writer_sa_email",
     ):
-        if values.get(field):
-            _validate_pattern(field, values[field], SA_EMAIL_RE)
+        val = values.get(field)
+        if isinstance(val, str) and val:
+            _validate_pattern(field, val, SA_EMAIL_RE)
 
     if values.get("kms_key_id"):
-        _validate_pattern("kms_key_id", values["kms_key_id"], KMS_KEY_RE)
+        _validate_pattern("kms_key_id", str(values["kms_key_id"]), KMS_KEY_RE)
     if values.get("backup_vault_id"):
         _validate_pattern(
-            "backup_vault_id", values["backup_vault_id"], BACKUP_VAULT_ID_RE
+            "backup_vault_id", str(values["backup_vault_id"]), BACKUP_VAULT_ID_RE
         )
     if values.get("vpc_id"):
-        _validate_pattern("vpc_id", values["vpc_id"], VPC_ID_RE)
+        _validate_pattern("vpc_id", str(values["vpc_id"]), VPC_ID_RE)
     if values.get("subnet_id"):
-        _validate_pattern("subnet_id", values["subnet_id"], SUBNET_ID_RE)
+        _validate_pattern("subnet_id", str(values["subnet_id"]), SUBNET_ID_RE)
     if values.get("datastream_network_attachment_id"):
         _validate_pattern(
             "datastream_network_attachment_id",
-            values["datastream_network_attachment_id"],
+            str(values["datastream_network_attachment_id"]),
             NETWORK_ATTACHMENT_RE,
         )
     if values.get("pii_restricted_policy_tag_id"):
         _validate_pattern(
             "pii_restricted_policy_tag_id",
-            values["pii_restricted_policy_tag_id"],
+            str(values["pii_restricted_policy_tag_id"]),
             POLICY_TAG_RE,
         )
     if values.get("pii_masked_policy_tag_id"):
         _validate_pattern(
             "pii_masked_policy_tag_id",
-            values["pii_masked_policy_tag_id"],
+            str(values["pii_masked_policy_tag_id"]),
             POLICY_TAG_RE,
         )
     if values.get("artifact_registry_repository_uri"):
         _validate_pattern(
             "artifact_registry_repository_uri",
-            values["artifact_registry_repository_uri"],
+            str(values["artifact_registry_repository_uri"]),
             ARTIFACT_REGISTRY_URI_RE,
         )
     if values.get("region"):
-        _validate_pattern("region", values["region"], REGION_RE)
+        _validate_pattern("region", str(values["region"]), REGION_RE)
     if values.get("environment"):
-        _validate_pattern("environment", values["environment"], ENVIRONMENT_RE)
+        _validate_pattern("environment", str(values["environment"]), ENVIRONMENT_RE)
     if values.get("prefix"):
-        _validate_pattern("prefix", values["prefix"], PREFIX_RE)
+        _validate_pattern("prefix", str(values["prefix"]), PREFIX_RE)
+    if values.get("domain_name"):
+        _validate_pattern("domain_name", str(values["domain_name"]), DOMAIN_NAME_RE)
+
+
+def resolve_env_gcs_uri(uri: str, env: str) -> str:
+    if not env:
+        return uri
+    rest = uri[len("gs://"):]
+    if "/" not in rest:
+        return f"gs://{rest}/{env}/foundation-outputs.json"
+    bucket, obj = rest.split("/", 1)
+    obj = obj.lstrip("/")
+    if not obj:
+        return f"gs://{bucket}/{env}/foundation-outputs.json"
+    parts = obj.split("/")
+    filename = parts[-1]
+    if env in parts[:-1]:
+        return uri
+    if filename and (
+        f"-{env}." in filename
+        or filename.startswith(f"{env}-")
+        or filename == f"{env}.json"
+    ):
+        return uri
+    if obj.endswith("/"):
+        return f"gs://{bucket}/{obj}{env}/foundation-outputs.json"
+    parent = "/".join(parts[:-1])
+    if parent:
+        return f"gs://{bucket}/{parent}/{env}/{filename}"
+    return f"gs://{bucket}/{env}/{filename}"
+
+
+def format_kms_binding_commands(values: dict[str, object]) -> list[str]:
+    kms_key_id = values.get("kms_key_id")
+    if not isinstance(kms_key_id, str) or not kms_key_id:
+        raise ValueError("kms_key_id is required when --print-kms-commands is passed.")
+    match = KMS_KEY_RE.match(kms_key_id)
+    if not match:
+        raise ValueError(f"Invalid kms_key_id '{kms_key_id}'")
+    kms_project, kms_location, kms_keyring, kms_key = match.groups()
+
+    compute_project = values.get("compute_project_id")
+    if not isinstance(compute_project, str) or not compute_project:
+        raise ValueError("compute_project_id is required when --print-kms-commands is passed.")
+
+    batch_sa = values.get("batch_loader_sa_email")
+    if not isinstance(batch_sa, str) or not batch_sa:
+        prefix = values.get("prefix") if isinstance(values.get("prefix"), str) and values.get("prefix") else "ent"
+        batch_sa = f"{prefix}-batch-loader@{compute_project}.iam.gserviceaccount.com"
+
+    members = [
+        "serviceAccount:service-<COMPUTE_PROJECT_NUMBER>@gcp-sa-pubsub.iam.gserviceaccount.com",
+        "serviceAccount:service-<COMPUTE_PROJECT_NUMBER>@gcp-sa-datastream.iam.gserviceaccount.com",
+        "serviceAccount:service-<COMPUTE_PROJECT_NUMBER>@gcp-sa-workflows.iam.gserviceaccount.com",
+        "serviceAccount:service-<COMPUTE_PROJECT_NUMBER>@serverless-robot-prod.iam.gserviceaccount.com",
+        f"serviceAccount:{batch_sa}",
+    ]
+    return [
+        (
+            f"gcloud kms keys add-iam-policy-binding {kms_key} "
+            f"--project={kms_project} --location={kms_location} --keyring={kms_keyring} "
+            f"--member={member} --role=roles/cloudkms.cryptoKeyEncrypterDecrypter"
+        )
+        for member in members
+    ]
 
 
 def build_linked_tfvars(
-    values: dict[str, str], target_variables_tf: Path | None = None
-) -> dict[str, str]:
-    linked: dict[str, str] = {}
+    values: dict[str, object], target_variables_tf: Path | None = None
+) -> dict[str, object]:
+    linked: dict[str, object] = {}
     for key, val in values.items():
-        if val:
+        if isinstance(val, bool) or val:
             linked[key] = val
 
     for primary, alias in ALIAS_PAIRS:
@@ -516,7 +621,7 @@ def build_linked_tfvars(
     return dict(sorted(linked.items()))
 
 
-def write_atomic_json(output_path: Path, payload: dict[str, str]) -> None:
+def write_atomic_json(output_path: Path, payload: dict[str, object]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{output_path.name}.",
@@ -555,6 +660,12 @@ def _resolve_cli_environment(raw_env: str | None, raw_environment: str | None) -
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.export_gcs is not None:
+        cleaned_gcs = args.export_gcs.strip()
+        if not cleaned_gcs or not GCS_URI_RE.match(cleaned_gcs):
+            print(f"ERROR: Invalid --export-gcs URI '{args.export_gcs}'", file=sys.stderr)
+            return 2
+
     try:
         target_env = _resolve_cli_environment(args.env, args.environment)
 
@@ -567,7 +678,7 @@ def main(argv: list[str] | None = None) -> int:
                         f"Conflicting CLI flags for {primary} and alias {alias}."
                     )
 
-        values: dict[str, str] = {}
+        values: dict[str, object] = {}
         if args.context is not None:
             values.update(load_context_values(args.context, target_env=target_env))
         elif target_env is not None:
@@ -593,10 +704,38 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     values.pop(primary, None)
 
+        if args.manage_kms_iam is not None:
+            values["manage_kms_iam"] = args.manage_kms_iam
+        elif values.get("kms_key_id") and values.get("manage_kms_iam") is not True:
+            values["manage_kms_iam"] = False
+
         validate_inputs(values)
         linked = build_linked_tfvars(values, args.target_variables_tf)
         write_atomic_json(args.output, linked)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+
+        if args.export_gcs is not None:
+            env_str = str(values.get("environment") or "")
+            resolved_gcs_uri = resolve_env_gcs_uri(args.export_gcs.strip(), env_str)
+            if not re.match(r"^gs://[^/]+/.+", resolved_gcs_uri):
+                raise ValueError(f"Invalid GCS URI (missing object path): {resolved_gcs_uri}")
+            if shutil.which("gcloud"):
+                subprocess.run(
+                    ["gcloud", "storage", "cp", str(args.output), resolved_gcs_uri],
+                    check=True,
+                )
+            elif shutil.which("gsutil"):
+                subprocess.run(
+                    ["gsutil", "cp", str(args.output), resolved_gcs_uri],
+                    check=True,
+                )
+            else:
+                raise OSError("Neither gcloud nor gsutil is installed in PATH.")
+            print(f"Uploaded linked variables to {resolved_gcs_uri}")
+
+        if args.print_kms_commands:
+            for cmd in format_kms_binding_commands(values):
+                print(cmd)
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
