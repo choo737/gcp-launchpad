@@ -65,6 +65,10 @@ python3 scripts/generate-brownfield-link.py \
 
 Verify the generated file has mode `0600` and contains only declared variables.
 
+When `egress_connector_subnet_id` references a Shared VPC subnet, attach `ml_ops_project_id` as a service project.
+Grant `roles/compute.networkUser` on that subnet to `service-<ML_OPS_PROJECT_NUMBER>@serverless-robot-prod.iam.gserviceaccount.com`.
+`generate-brownfield-link.py` prints these Shared VPC preflight commands automatically for `--target data-science`.
+
 ## Step 4: Configure `gcp-data-medallion` Compilation Inputs
 
 Map the same confirmed IDs into `gcp-data-medallion`:

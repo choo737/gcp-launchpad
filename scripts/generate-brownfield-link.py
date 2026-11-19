@@ -40,7 +40,7 @@ VPC_ID_RE = re.compile(
     r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/global/networks/[A-Za-z0-9._-]+$"
 )
 SUBNET_ID_RE = re.compile(
-    r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/regions/[a-z0-9-]+/subnetworks/[A-Za-z0-9._-]+$"
+    r"^projects/([a-z][a-z0-9-]{4,28}[a-z0-9])/regions/([a-z0-9-]+)/subnetworks/([A-Za-z0-9._-]+)$"
 )
 NETWORK_ATTACHMENT_RE = re.compile(
     r"^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/regions/[a-z0-9-]+/networkAttachments/[A-Za-z0-9._-]+$"
@@ -843,6 +843,36 @@ def format_kms_binding_commands(
     return commands
 
 
+def format_shared_vpc_commands(
+    values: dict[str, object], target: str = "ingestion"
+) -> list[str]:
+    if target != "data-science":
+        return []
+    subnet_id = values.get("egress_connector_subnet_id")
+    ml_ops_project = values.get("ml_ops_project_id")
+    if not isinstance(subnet_id, str) or not subnet_id:
+        return []
+    if not isinstance(ml_ops_project, str) or not ml_ops_project:
+        return []
+    match = SUBNET_ID_RE.match(subnet_id)
+    if not match:
+        return []
+    host_project, region, subnet_name = match.groups()
+    if host_project == ml_ops_project:
+        return []
+    return [
+        f"# Shared VPC preflight/remediation for ml_ops ({ml_ops_project}) on egress_connector_subnet_id:",
+        f"ML_OPS_PROJECT_NUMBER=\"$(gcloud projects describe '{ml_ops_project}' --format='value(projectNumber)')\"",
+        f"gcloud compute shared-vpc associated-projects add '{ml_ops_project}' --host-project='{host_project}'",
+        (
+            f"gcloud compute networks subnets add-iam-policy-binding '{subnet_name}' "
+            f"--project='{host_project}' --region='{region}' "
+            "--member=\"serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com\" "
+            "--role=roles/compute.networkUser"
+        ),
+    ]
+
+
 def build_linked_tfvars(
     values: dict[str, object],
     target_variables_tf: Path | None = None,
@@ -993,6 +1023,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.print_kms_commands:
             for cmd in format_kms_binding_commands(values, target=args.target):
                 print(cmd)
+        for cmd in format_shared_vpc_commands(values, target=args.target):
+            print(cmd)
     except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

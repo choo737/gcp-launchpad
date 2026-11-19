@@ -2019,6 +2019,34 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             ):
                 self.assertIn(expected_cmd, ds_res.stdout)
 
+            # Verify --target data-science prints Shared VPC attachment and Cloud Run subnet IAM guidance when egress_connector_subnet_id is set.
+            shared_vpc_out = tmp_root / "ds_shared_vpc.auto.tfvars.json"
+            shared_vpc_res = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--context",
+                    str(brownfield_ctx),
+                    "--target",
+                    "data-science",
+                    "--egress-connector-subnet-id",
+                    "projects/acme-dev01-network/regions/asia-southeast1/subnetworks/acme-ds-subnet",
+                    "--output",
+                    str(shared_vpc_out),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(shared_vpc_res.returncode, 0, shared_vpc_res.stderr)
+            for expected_net_cmd in (
+                "gcloud compute shared-vpc associated-projects add 'acme-dev01-ml-ops' --host-project='acme-dev01-network'",
+                "gcloud compute networks subnets add-iam-policy-binding 'acme-ds-subnet' --project='acme-dev01-network' --region='asia-southeast1'",
+                "service-${ML_OPS_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com",
+                "--role=roles/compute.networkUser",
+            ):
+                self.assertIn(expected_net_cmd, shared_vpc_res.stdout)
+
             # Verify staging/prod resolution for --target data-science has zero dev01 leaks.
             for target_env, expected_suffix in (("staging", "stg01"), ("prod", "prd01")):
                 with self.subTest(target_env=target_env):
