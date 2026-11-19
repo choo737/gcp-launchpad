@@ -1890,6 +1890,9 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "bqml_schedule_cron",
             "core_project_id",
             "cpr_container_image",
+            "cpr_model_artifact_uri",
+            "cpr_model_sha256",
+            "create_ml_audit_ledger_table",
             "deploy_cpr_model",
             "domain_name",
             "ds_exp_project_id",
@@ -1919,7 +1922,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "silver_dataset_id",
             "vpc_id",
         }
-        self.assertEqual(len(gbl.DATA_SCIENCE_DECLARED_VARS), 32)
+        self.assertEqual(len(gbl.DATA_SCIENCE_DECLARED_VARS), 35)
         self.assertEqual(gbl.DATA_SCIENCE_DECLARED_VARS, expected_ds_vars)
 
         ds_vars_tf = (
@@ -1968,6 +1971,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 set(ds_linked.keys()),
                 {
                     "core_project_id",
+                    "create_ml_audit_ledger_table",
                     "ds_exp_project_id",
                     "ds_serving_track",
                     "enable_online_feature_store",
@@ -1987,6 +1991,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                     "vpc_id",
                 },
             )
+            self.assertIs(ds_linked["create_ml_audit_ledger_table"], True)
             self.assertEqual(ds_linked["ds_exp_project_id"], "acme-dev01-ds-exp")
             self.assertEqual(ds_linked["ml_ops_project_id"], "acme-dev01-ml-ops")
             self.assertEqual(ds_linked["ds_serving_track"], "vertex_cpr_online")
@@ -2002,7 +2007,15 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 "DS_EXP_PROJECT_NUMBER=\"$(gcloud projects describe 'acme-dev01-ds-exp' --format='value(projectNumber)')\"",
                 "gcloud kms keys add-iam-policy-binding data-cmek --project=acme-dev01-data-gov --location=asia-southeast1 --keyring=data-ring",
                 "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com",
+                "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-artifactregistry.iam.gserviceaccount.com",
+                "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gs-project-accounts.iam.gserviceaccount.com",
+                "serviceAccount:bq-${ML_OPS_PROJECT_NUMBER}@bigquery-encryption.iam.gserviceaccount.com",
+                "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-dataplex.iam.gserviceaccount.com",
+                "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com",
+                "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-workflows.iam.gserviceaccount.com",
+                "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com",
                 "serviceAccount:service-${DS_EXP_PROJECT_NUMBER}@gcp-sa-notebooks.iam.gserviceaccount.com",
+                "serviceAccount:service-${DS_EXP_PROJECT_NUMBER}@compute-system.iam.gserviceaccount.com",
             ):
                 self.assertIn(expected_cmd, ds_res.stdout)
 

@@ -243,6 +243,9 @@ DATA_SCIENCE_DECLARED_VARS = frozenset({
     "bqml_schedule_cron",
     "core_project_id",
     "cpr_container_image",
+    "cpr_model_artifact_uri",
+    "cpr_model_sha256",
+    "create_ml_audit_ledger_table",
     "deploy_cpr_model",
     "domain_name",
     "ds_exp_project_id",
@@ -790,7 +793,15 @@ def format_kms_binding_commands(
         ]
         members = [
             "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com",
+            "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-artifactregistry.iam.gserviceaccount.com",
+            "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gs-project-accounts.iam.gserviceaccount.com",
+            "serviceAccount:bq-${ML_OPS_PROJECT_NUMBER}@bigquery-encryption.iam.gserviceaccount.com",
+            "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-dataplex.iam.gserviceaccount.com",
+            "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com",
+            "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-workflows.iam.gserviceaccount.com",
+            "serviceAccount:service-${ML_OPS_PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com",
             "serviceAccount:service-${DS_EXP_PROJECT_NUMBER}@gcp-sa-notebooks.iam.gserviceaccount.com",
+            "serviceAccount:service-${DS_EXP_PROJECT_NUMBER}@compute-system.iam.gserviceaccount.com",
         ]
         commands.extend(
             (
@@ -858,6 +869,9 @@ def build_linked_tfvars(
         declared = DATA_SCIENCE_DECLARED_VARS
     else:
         declared = INGESTION_DECLARED_VARS
+
+    if target == "data-science" and "create_ml_audit_ledger_table" not in linked:
+        linked["create_ml_audit_ledger_table"] = True
 
     linked = {k: v for k, v in linked.items() if k in declared}
     return dict(sorted(linked.items()))
