@@ -403,6 +403,8 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "project_suffix",
             "github_owner",
             "ci_identity_mode",
+            "enterprise_teams",
+            "applications",
             "existing_landing_zone",
         }
         for mode, filename in (
@@ -433,6 +435,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                         "finops_billing_export_location",
                         "monthly_budget_amount",
                         "environment_budgets",
+                        "department_budgets",
                         "workload_budgets",
                         "budget_thresholds",
                         "enable_forecasted_threshold",
@@ -447,6 +450,14 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 self.assertIsInstance(finops["environment_budgets"], dict)
                 self.assertTrue(finops["environment_budgets"])
                 for amt in finops["environment_budgets"].values():
+                    self.assertIsInstance(amt, (int, float))
+                    self.assertNotIsInstance(amt, bool)
+                    self.assertGreater(amt, 0)
+                self.assertEqual(
+                    set(finops["department_budgets"].keys()),
+                    {"data", "ai", "app", "shared"},
+                )
+                for amt in finops["department_budgets"].values():
                     self.assertIsInstance(amt, (int, float))
                     self.assertNotIsInstance(amt, bool)
                     self.assertGreater(amt, 0)
@@ -521,6 +532,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                     {
                         "scc_tier",
                         "scc_scope",
+                        "create_dedicated_secops_project",
                         "enable_audit_cmek",
                         "scc_alert_email_addresses",
                         "runtime_detectors",
@@ -528,6 +540,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 )
                 self.assertIn(scc["scc_tier"], ("NONE", "STANDARD", "PREMIUM"))
                 self.assertIn(scc["scc_scope"], ("FOLDER", "PROJECT"))
+                self.assertIsInstance(scc["create_dedicated_secops_project"], bool)
                 self.assertIsInstance(scc["enable_audit_cmek"], bool)
                 self.assertIsInstance(scc["scc_alert_email_addresses"], list)
                 self.assertIsInstance(scc["runtime_detectors"], list)
@@ -577,6 +590,49 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                 self.assertLessEqual(ds["fairness_min_disparate_impact"], 1.0)
                 self.assertIn("gcp-data-science", payload["selected_templates"])
 
+                teams = payload["enterprise_teams"]
+                self.assertEqual(
+                    set(teams.keys()),
+                    {
+                        "cloudops_admins_group",
+                        "finops_admins_group",
+                        "network_admins_group",
+                        "security_admins_group",
+                        "secops_analysts_group",
+                        "data_admins_group",
+                        "ai_admins_group",
+                        "app_admins_group",
+                    },
+                )
+                for grp_val in teams.values():
+                    self.assertIsInstance(grp_val, str)
+                    self.assertIn("@", grp_val)
+
+                apps = payload["applications"]
+                self.assertEqual(
+                    set(apps.keys()),
+                    {"enable_apps", "shared_artifact_registry", "workloads"},
+                )
+                self.assertIsInstance(apps["enable_apps"], bool)
+                self.assertIsInstance(apps["shared_artifact_registry"], bool)
+                self.assertIsInstance(apps["workloads"], dict)
+                self.assertIn("app1", apps["workloads"])
+                app1 = apps["workloads"]["app1"]
+                self.assertEqual(
+                    set(app1.keys()),
+                    {
+                        "display_name",
+                        "enable_cloud_run",
+                        "enable_gke",
+                        "enable_cloud_sql",
+                        "admin_group",
+                        "developer_group",
+                    },
+                )
+                self.assertIsInstance(app1["enable_cloud_run"], bool)
+                self.assertIsInstance(app1["enable_gke"], bool)
+                self.assertIsInstance(app1["enable_cloud_sql"], bool)
+
         gf = json.loads(
             (REPO_ROOT / "examples" / "platform-context.greenfield.json").read_text(
                 encoding="utf-8"
@@ -594,6 +650,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
         self.assertEqual(gf["backup_dr"]["gcs_rpo"], "DEFAULT")
         self.assertFalse(gf["ngfw"]["enable_ngfw_enterprise"])
         self.assertEqual(gf["scc"]["scc_tier"], "PREMIUM")
+        self.assertTrue(gf["scc"]["create_dedicated_secops_project"])
         self.assertIn("VIRTUAL_MACHINE_THREAT_DETECTION", gf["scc"]["runtime_detectors"])
         self.assertTrue(gf["data_science"]["enable_data_science"])
         self.assertEqual(gf["data_science"]["ds_serving_track"], "both")
@@ -619,6 +676,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
         self.assertFalse(bf["backup_dr"]["enable_dual_region_gcs"])
         self.assertFalse(bf["ngfw"]["enable_ngfw_enterprise"])
         self.assertEqual(bf["scc"]["scc_tier"], "STANDARD")
+        self.assertFalse(bf["scc"]["create_dedicated_secops_project"])
         self.assertTrue(bf["data_science"]["enable_data_science"])
         self.assertEqual(bf["data_science"]["ds_serving_track"], "vertex_cpr_online")
         self.assertFalse(bf["data_science"]["enable_ds_workbench"])
@@ -1507,6 +1565,11 @@ class LaunchpadIntegrityTest(unittest.TestCase):
             "GCP_NET_SEC_WIF_SA",
             "GCP_DATA_PLAT_WIF_SA",
             "GCP_DS_WIF_SA",
+            "GCP_APP_WIF_SA",
+            "tf_app_ci",
+            "--target apps",
+            "apps/enterprise",
+            "Environment -> Department",
             "<prefix>_ops_telemetry.pipeline_runs",
             "make plan STAGE=<stage> ENV=<env> TFSTATE_BUCKET=<bucket>",
         ):
@@ -2154,6 +2217,222 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                     )
                     self.assertNotEqual(err_res.returncode, 0)
                     self.assertIn(expected_err, err_res.stderr)
+
+    def test_generate_brownfield_link_apps_target_uat_and_validation(self) -> None:
+        script = REPO_ROOT / "scripts" / "generate-brownfield-link.py"
+        brownfield_ctx = REPO_ROOT / "examples" / "platform-context.brownfield.json"
+
+        spec = importlib.util.spec_from_file_location("generate_brownfield_link_apps", script)
+        self.assertIsNotNone(spec)
+        assert spec is not None and spec.loader is not None
+        gbl = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gbl)
+
+        expected_apps_vars = {
+            "app_admins_group",
+            "app_folder_id",
+            "applications",
+            "auto_unique_suffix",
+            "billing_account",
+            "deletion_protection",
+            "enforce_vpc_sc",
+            "environment",
+            "environment_app_folder_ids",
+            "finops_tag_value_ids",
+            "kms_key_id",
+            "labels",
+            "manage_kms_iam",
+            "manage_vpc_sc",
+            "prefix",
+            "project_deletion_policy",
+            "project_suffix",
+            "propagation_wait_seconds",
+            "region",
+            "shared_artifact_registry_id",
+            "shared_vpc_host_project_id",
+            "subnet_id",
+            "vpc_id",
+            "vpc_sc_perimeter_name",
+        }
+        self.assertEqual(len(gbl.APPS_DECLARED_VARS), 24)
+        self.assertEqual(gbl.APPS_DECLARED_VARS, expected_apps_vars)
+
+        apps_vars_tf = (
+            REPO_ROOT.parent / "gcp-foundation" / "apps" / "enterprise" / "variables.tf"
+        )
+        if apps_vars_tf.is_file():
+            declared_apps_vars = set(
+                re.findall(
+                    r'^\s*variable\s+"([A-Za-z0-9_]+)"\s*\{',
+                    apps_vars_tf.read_text(encoding="utf-8"),
+                    re.MULTILINE,
+                )
+            )
+            self.assertEqual(gbl.APPS_DECLARED_VARS, declared_apps_vars)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            out_file = tmp_root / "apps_linked.auto.tfvars.json"
+            ctx_payload = json.loads(brownfield_ctx.read_text(encoding="utf-8"))
+            ctx_payload["existing_landing_zone"]["by_environment"]["uat"] = {
+                **ctx_payload["existing_landing_zone"]["by_environment"]["staging"],
+                "core_project_id": "acme-uat01-data-core",
+                "compute_project_id": "acme-uat01-data-etl",
+                "kms_key_id": "projects/acme-uat01-data-gov/locations/asia-southeast1/keyRings/data-ring/cryptoKeys/data-cmek",
+                "vpc_id": "projects/acme-uat01-network/global/networks/acme-shared-vpc",
+                "subnet_id": "projects/acme-uat01-network/regions/asia-southeast1/subnetworks/acme-etl-subnet",
+            }
+            uat_ctx = tmp_root / "uat-context.json"
+            uat_ctx.write_text(json.dumps(ctx_payload), encoding="utf-8")
+
+            test_billing = "-".join(["111111", "222222", "ABCDEF"])
+            res = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--context",
+                    str(uat_ctx),
+                    "--target",
+                    "apps",
+                    "--environment",
+                    "uat",
+                    "--billing-account",
+                    test_billing,
+                    "--app-folder-id",
+                    "1000000001",
+                    "--project-deletion-policy",
+                    "PREVENT",
+                    "--no-manage-kms-iam",
+                    "--print-kms-commands",
+                    "--output",
+                    str(out_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(stat.S_IMODE(out_file.stat().st_mode), 0o600)
+            linked = json.loads(out_file.read_text(encoding="utf-8"))
+            self.assertEqual(linked["environment"], "uat")
+            self.assertEqual(linked["billing_account"], test_billing)
+            self.assertEqual(linked["app_folder_id"], "1000000001")
+            self.assertEqual(linked["shared_vpc_host_project_id"], "acme-uat01-network")
+            self.assertEqual(linked["app_admins_group"], "grp-app-admins@example.com")
+            self.assertIn("app1", linked["applications"])
+            self.assertEqual(linked["project_suffix"], "dev01")
+            self.assertEqual(linked["project_deletion_policy"], "PREVENT")
+            self.assertIs(linked["manage_kms_iam"], False)
+            self.assertTrue(set(linked.keys()).issubset(expected_apps_vars))
+
+            for expected_cmd in (
+                "gcloud compute shared-vpc associated-projects add '<APP_PROJECT_ID>' --host-project='acme-uat01-network'",
+                "--role=roles/compute.networkUser",
+                "serviceAccount:service-${APP_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com",
+                "serviceAccount:${APP_PROJECT_NUMBER}@cloudservices.gserviceaccount.com",
+                "serviceAccount:service-${APP_PROJECT_NUMBER}@container-engine-robot.iam.gserviceaccount.com",
+                "--role=roles/container.hostServiceAgentUser",
+                "gcp-sa-cloud-sql.iam.gserviceaccount.com",
+                "gcp-sa-artifactregistry.iam.gserviceaccount.com",
+                "compute-system.iam.gserviceaccount.com",
+            ):
+                self.assertIn(expected_cmd, res.stdout)
+
+            bad_cases = [
+                (
+                    "bad_enterprise_teams_missing",
+                    {"enterprise_teams": {"cloudops_admins_group": "grp-cloudops@example.com"}},
+                    "Invalid enterprise_teams keys",
+                ),
+                (
+                    "bad_applications_type",
+                    {"applications": {"enable_apps": "yes", "shared_artifact_registry": True, "workloads": {}}},
+                    "applications.enable_apps must be a boolean",
+                ),
+                (
+                    "bad_department_budgets",
+                    {"finops": {**ctx_payload["finops"], "department_budgets": {"data": -5}}},
+                    "finops.department_budgets.data must be a positive number",
+                ),
+                (
+                    "bad_dedicated_secops",
+                    {"scc": {**ctx_payload["scc"], "create_dedicated_secops_project": "true"}},
+                    "scc.create_dedicated_secops_project must be a boolean",
+                ),
+            ]
+            for label, overrides, expected_err in bad_cases:
+                with self.subTest(bad_case=label):
+                    bad_ctx = tmp_root / f"{label}.json"
+                    bad_ctx.write_text(json.dumps({**ctx_payload, **overrides}), encoding="utf-8")
+                    bad_res = subprocess.run(
+                        [
+                            sys.executable,
+                            str(script),
+                            "--context",
+                            str(bad_ctx),
+                            "--target",
+                            "apps",
+                            "--output",
+                            str(out_file),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(bad_res.returncode, 0)
+                    self.assertIn(expected_err, bad_res.stderr)
+
+    def test_suggest_company_acronym_and_org_name_cli(self) -> None:
+        script = REPO_ROOT / "scripts" / "generate-brownfield-link.py"
+        spec = importlib.util.spec_from_file_location("generate_brownfield_link_acronym", script)
+        self.assertIsNotNone(spec)
+        assert spec is not None and spec.loader is not None
+        gbl = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gbl)
+
+        for org_name, expected in (
+            ("Example Global Retail Ltd", "egr"),
+            ("Example Global Retail Holdings Ltd", "egr"),
+            ("Sample Financial Group", "sfg"),
+            ("Sample Financial Group Berhad", "sfg"),
+            ("Example Utility Berhad", "eub"),
+            ("Sample Cloud Analytics Sdn Bhd", "sca"),
+            ("Acme Sample Bank Bhd", "asb"),
+            ("9Sample Retail Mart Bhd", "c9rm"),
+            ("123 Example Cloud Ltd", "c1ec"),
+            ("Acme Corp", "acm"),
+            ("Alpha Beta Gamma Delta Inc", "abgd"),
+            ("One Two Three Four Five Six Seven Ltd", "ottffs"),
+        ):
+            with self.subTest(org_name=org_name):
+                self.assertEqual(gbl.suggest_company_acronym(org_name), expected)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out_file = Path(tmp_dir) / "org_apps.auto.tfvars.json"
+            res = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--target",
+                    "apps",
+                    "--org-name",
+                    "Example Global Retail Ltd",
+                    "--region",
+                    "asia-southeast1",
+                    "--env",
+                    "uat",
+                    "--output",
+                    str(out_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertIn("Suggested prefix 'egr'", res.stdout)
+            linked = json.loads(out_file.read_text(encoding="utf-8"))
+            self.assertEqual(linked["prefix"], "egr")
+            self.assertEqual(linked["environment"], "uat")
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ Together they fit into a single Google Cloud environment without overlapping own
 | Template Repository | Status | Included Capabilities | Best For |
 | --- | --- | --- | --- |
 | **gcp-launchpad** *(this repo)* | Active | Intake questionnaire, preflight checks, Brownfield bridge, and playbook | Multi-repo planning and team handoffs |
-| [gcp-foundation](https://github.com/choo737/gcp-foundation) | Active | Landing Zone, Folders, Shared VPC, VPC-SC, KMS, SCC, Audit Logs, BigQuery, WIF | Greenfield orgs, regulated FSI, or brownfield folders |
+| [gcp-foundation](https://github.com/choo737/gcp-foundation) | Active | Landing Zone, Folders (`Environment -> Department`), VPC, KMS, SCC, FinOps, `apps/enterprise`, WIF | Greenfield orgs, regulated FSI, or brownfield folders |
 | [gcp-data-ingestion](https://github.com/choo737/gcp-data-ingestion) | Active | Datastream CDC, Pub/Sub Streaming + DLQ, Cloud Run Batch ELT, Workflows, Composer 3 | Greenfield linked or standalone Brownfield zones |
 | [gcp-data-medallion](https://github.com/choo737/gcp-data-medallion) | Active | Dataform `3.1.5` SQLX Medallion, Dual-Tier PII Tags, Dataplex Auto DQ, Tag Promotion | Greenfield or standalone Brownfield BigQuery Bronze |
 | [gcp-data-science](https://github.com/choo737/gcp-data-science) | Active | BQML & TreeSHAP CPR XAI, Hardened Workbench, Feature Store, 7-Yr WORM Audit | Regulated ML and explainable scoring on Silver tables |
@@ -55,8 +55,9 @@ flowchart TD
     K --> L["Follow repo setup skill in private clone"]
 ```
 
-- **Greenfield `link-stages.sh`**: Deploy `gcp-foundation` first, then run `link-stages.sh` to export outputs into downstream stages.
-- **Brownfield `scripts/generate-brownfield-link.py`**: Skip `gcp-foundation` and write `00_linked.auto.tfvars.json` (`0600`) from existing landing zone IDs.
+- **Greenfield `link-stages.sh`**: Deploy `gcp-foundation` first, then run `link-stages.sh` (`dev`, `uat`, `staging`, `prod`) into downstream stages.
+- **Brownfield `scripts/generate-brownfield-link.py`**: Skip `gcp-foundation` and emit `00_linked.auto.tfvars.json` (`0600`) for ingestion, data-science, or apps.
+- **7-Team & App Factory**: Map `enterprise_teams`, `department_budgets`, `create_dedicated_secops_project`, and `applications` into `gcp-foundation/apps/enterprise`.
 - **Single-repo adoption**: Each template keeps its own standalone `QUESTIONNAIRE.md` for direct adoption without `gcp-launchpad`.
 
 ### Team Size & Separation of Duties Tiers (`team_size_tier`)
@@ -84,7 +85,7 @@ Choose a tier matching team boundaries, GitHub plan features, and regulatory sep
 Follow the full cross-repository runbook in [docs/01-end-to-end-operational-playbook.md](docs/01-end-to-end-operational-playbook.md).
 
 1. **Step 1 — Day 0: Architecture Intake & Private Repository Bootstrap**. Complete [QUESTIONNAIRE.md](QUESTIONNAIRE.md), create `--private` repos, and deploy `00-bootstrap` WIF.
-2. **Step 2 — Day 1A: Landing Zone Rollout (`gcp-foundation`) or Brownfield Bridge**. Deploy `gcp-foundation` with `link-stages.sh`, or run `scripts/generate-brownfield-link.py`.
+2. **Step 2 — Day 1A: Landing Zone (`gcp-foundation` + `apps/enterprise`) or Brownfield Bridge**. Deploy foundation and apps with `link-stages.sh`, or run `generate-brownfield-link.py`.
 3. **Step 3 — Day 1B: Ingestion Rollout (`gcp-data-ingestion`)**. Link upstream outputs, build `@sha256` loaders, store secrets, and promote environments.
 4. **Step 4 — Day 1C: Medallion & Data Science Rollout**. Deploy `gcp-data-medallion` SQLX models and `gcp-data-science` XAI pipelines.
 5. **Step 5 — Day 2: Onboard a New Business Data Source**. Add feeds in Ingestion, models in Medallion, and Gold domains in Foundation.
@@ -124,7 +125,7 @@ Every push to `main` and every pull request runs `.github/workflows/ci.yml` on `
 ## Repository Layout
 
 - `assets/`: Cloud City visual architecture animations and org completeness scanner diagram.
-- `QUESTIONNAIRE.md`: Seven-section Tier-1 intake questionnaire producing gitignored `platform-context.json`.
+- `QUESTIONNAIRE.md`: Eight-section Tier-1 intake questionnaire producing gitignored `platform-context.json`.
 - `docs/`: End-to-end operational playbook, template documentation standard, and `03-org-completeness-scanner-design.md`.
 - `examples/`: Reference `platform-context.greenfield.json` and `platform-context.brownfield.json` contracts.
 - `scripts/`: `preflight-check.sh` validator and `generate-brownfield-link.py` tfvars bridge (`0600`).

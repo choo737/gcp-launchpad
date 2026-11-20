@@ -29,6 +29,12 @@
       "staging": 1500,
       "prod": 3000
     },
+    "department_budgets": {
+      "data": 1500,
+      "ai": 1000,
+      "app": 2000,
+      "shared": 500
+    },
     "workload_budgets": {
       "data-platform": {
         "amount": 2500,
@@ -72,6 +78,7 @@
   "scc": {
     "scc_tier": "STANDARD",
     "scc_scope": "FOLDER",
+    "create_dedicated_secops_project": false,
     "enable_audit_cmek": true,
     "scc_alert_email_addresses": [
       "gcp-secops-alerts@example.com"
@@ -87,6 +94,30 @@
     "xai_audit_retention_days": 365,
     "shap_additivity_tolerance": 0.00001,
     "fairness_min_disparate_impact": 0.80
+  },
+  "enterprise_teams": {
+    "cloudops_admins_group": "grp-cloudops-admins@example.com",
+    "finops_admins_group": "grp-finops-admins@example.com",
+    "network_admins_group": "grp-network-admins@example.com",
+    "security_admins_group": "grp-security-admins@example.com",
+    "secops_analysts_group": "grp-secops-analysts@example.com",
+    "data_admins_group": "grp-data-admins@example.com",
+    "ai_admins_group": "grp-ai-admins@example.com",
+    "app_admins_group": "grp-app-admins@example.com"
+  },
+  "applications": {
+    "enable_apps": true,
+    "shared_artifact_registry": true,
+    "workloads": {
+      "app1": {
+        "display_name": "APP 1",
+        "enable_cloud_run": true,
+        "enable_gke": false,
+        "enable_cloud_sql": false,
+        "admin_group": "grp-app1-admins@example.com",
+        "developer_group": "grp-app1-devs@example.com"
+      }
+    }
   },
   "existing_landing_zone": {
     "environment": "dev",

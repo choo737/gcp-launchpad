@@ -1,6 +1,6 @@
 # Tier-1 Architecture Router Questionnaire
 
-Answer these seven sections to choose templates, compliance guardrails, and landing zone wiring.
+Answer these eight sections to choose templates, compliance guardrails, team groups, and landing zone wiring.
 
 Save answers in gitignored `platform-context.json` before creating private customer repositories.
 
@@ -63,7 +63,8 @@ Isolate billing data and route multi-tier spend alerts to Google Groups.
 - **`finops_billing_export_location` (`"US"` default)**: Choose `"US"` multi-region for automatic 2-month spend backfill per [Billing Export Guide](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery).
 - **`finops_billing_export_location` (`"asia-southeast1"` option)**: Choose `"asia-southeast1"` (forward-only) for strict metadata residency or direct joins with `<prefix>_ops_telemetry`.
 - **Console toggle step**: Complete the one-time Cloud Console Billing Export toggle after Terraform creates the export dataset.
-- **Budget controls**: Set `monthly_budget_amount`, `environment_budgets`, `workload_budgets`, `budget_thresholds` (`[0.5, 0.8, 0.9, 1.0]`), and `enable_forecasted_threshold` (`100%` forecasted).
+- **Budget controls**: Set `monthly_budget_amount`, `environment_budgets`, `department_budgets`, `workload_budgets`, `budget_thresholds` (`[0.5, 0.8, 0.9, 1.0]`), and `enable_forecasted_threshold`.
+- **Department budgets (`department_budgets`)**: Split monthly caps across `data`, `ai`, `app`, and `shared` departments (`1500`, `1000`, `2000`, `500`).
 - **Alert routing (`finops_alert_email_addresses`)**: Route alerts to `gcp-finops-alerts@<domain>` and `gcp-billing-admins@<domain>` (max 5 channels per budget).
 
 ### Pillar 2: Backup & Disaster Recovery
@@ -95,6 +96,7 @@ Configure threat detection, finding exports, and security operations routing.
 
 - **`scc_tier`**: Choose `NONE`, `STANDARD`, or `PREMIUM`. Note that `SCC Enterprise` retires May 21, 2027.
 - **`scc_scope`**: Choose `FOLDER` activation versus `PROJECT` pay-as-you-go (`PAYG`) coverage.
+- **`create_dedicated_secops_project`**: Set `true` for `<prefix>-cmn-secops` isolation, or `false` to colocate inside `<prefix>-audit`.
 - **Organization ID (`organization_id`)**: Required for `PREMIUM` Security Posture or custom ETD modules even when `scc_scope = "FOLDER"`.
 - **Audit KMS CMEK (`enable_audit_cmek`)**: Encrypt `<prefix>_scc_findings` BigQuery exports and Pub/Sub topics using Stage-01 Audit KMS keys.
 - **Alert routing (`scc_alert_email_addresses`)**: Route high and critical SCC findings to `gcp-secops-alerts@<domain>`.
@@ -110,11 +112,13 @@ Confirm where workloads and backup replicas must reside.
 
 ## Section 5: Environments & Naming
 
-Define environment tiers and short naming tokens so GCP project IDs stay within 30 characters.
+Define environment tiers and a company acronym so GCP project IDs stay within 30 characters.
 
-- **`environments`**: Choose active tiers from `dev`, `staging`, and `prod`.
-- **`prefix`**: Use 3 to 8 lowercase characters matching `^[a-z][a-z0-9-]{1,6}[a-z0-9]$`.
-- **`project_suffix`**: Use up to 8 characters such as `dev01` to prevent soft-delete ID collisions.
+- **`environments`**: Choose active tiers from `dev`, `uat`, `staging`, and `prod`.
+- **Company / Organization Acronym (`prefix`)**: Use `3` to `6` lowercase chars (max `8`) matching `^[a-z][a-z0-9-]{1,6}[a-z0-9]$`.
+- **Deterministic acronym rule**: Strip legal suffixes (`Bhd`, `Berhad`, `Sdn`, `Pte`, `Ltd`, `Inc`, `Corp`, `Holdings`, `Group`) when three core words remain.
+- **Acronym examples**: Suggest `egr` for `'Example Global Retail Ltd'` and `sfg` for `'Sample Financial Group'`, then confirm.
+- **`project_suffix` / `auto_unique_suffix`**: Set `project_suffix` (`<= 8` chars) or set `auto_unique_suffix = true` for a 4-char code.
 
 ## Section 6: GitOps & CI Identity
 
@@ -140,6 +144,24 @@ Configure `gcp-data-science` for model training, explainable scoring, and BNM RM
 - **Online Feature Store (`enable_online_feature_store`)**: Uses Bigtable backing instead of `optimized` tier. Must stay `false` in `asia-southeast2`.
 - **7-year BNM RMiT WORM ledger (`xai_audit_retention_days`)**: Set `>= 2555` days under `regulated_fsi_rmit` for `ml_xai_audit_ledger` and WORM buckets.
 - **MRM `model-validator` gate**: Enforce `shap_additivity_tolerance` (`0.00001`, max `0.001`) and `fairness_min_disparate_impact` (`0.80`) before model promotion.
+
+## Section 8: Enterprise Teams & Application Workloads
+
+Configure 7-team Google Groups (`enterprise_teams`) and `gcp-foundation/apps/enterprise` workloads (`applications`).
+
+- **7-Team Google Groups (`enterprise_teams`)**: Map `cloudops_admins_group`, `finops_admins_group`, `network_admins_group`, `security_admins_group`, `secops_analysts_group`, `data_admins_group`, `ai_admins_group`, and `app_admins_group`.
+- **App factory (`applications`)**: Set `enable_apps`, `shared_artifact_registry`, and `workloads` (`display_name`, `enable_cloud_run`, `enable_gke`, `enable_cloud_sql`, `admin_group`, `developer_group`).
+
+## Deterministic Agent Routing Table
+
+AI coding agents must route confirmed questionnaire values to these exact targets:
+
+| Context Block | Target Stage / Repo | Bridge / Link Command |
+| --- | --- | --- |
+| `finops`, `scc`, `backup_dr`, `ngfw`, `enterprise_teams` | `gcp-foundation/foundation/*` | `scripts/link-stages.sh --env <env>` |
+| `existing_landing_zone` (`ingestion`) | `gcp-data-ingestion/stages/enterprise` | `generate-brownfield-link.py --target ingestion` |
+| `data_science` + `existing_landing_zone` | `gcp-data-science/stages/enterprise` | `generate-brownfield-link.py --target data-science` |
+| `applications` + `enterprise_teams.app_admins_group` | `gcp-foundation/apps/enterprise` | `generate-brownfield-link.py --target apps` |
 
 ## Output Contract (`platform-context.json`)
 

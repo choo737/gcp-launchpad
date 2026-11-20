@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate 00_linked.auto.tfvars.json for brownfield gcp-data-ingestion or gcp-data-science deployments."""
+"""Generate 00_linked.auto.tfvars.json for brownfield ingestion, data-science, or apps."""
 
 from __future__ import annotations
 
@@ -16,8 +16,11 @@ import tempfile
 PROJECT_ID_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
 DATASET_ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 BUCKET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$")
-ENVIRONMENT_RE = re.compile(r"^(dev|staging|prod)$")
+ENVIRONMENT_RE = re.compile(r"^(dev|uat|staging|prod)$")
 PREFIX_RE = re.compile(r"^[a-z][a-z0-9-]{1,6}[a-z0-9]$")
+PROJECT_SUFFIX_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,6}[a-z0-9])?$")
+BILLING_ACCOUNT_RE = re.compile(r"^[0-9A-F]{6}-[0-9A-F]{6}-[0-9A-F]{6}$")
+FOLDER_ID_RE = re.compile(r"^(?:folders/)?[0-9]{6,25}$")
 DOMAIN_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,19}[a-z0-9]$")
 GCS_URI_RE = re.compile(r"^gs://[a-z0-9][a-z0-9._-]{1,61}[a-z0-9](/.*)?$")
 REGION_RE = re.compile(r"^[a-z]+-[a-z]+[0-9]+$")
@@ -62,6 +65,48 @@ ML_ARTIFACT_REPO_PATH_RE = re.compile(
 TF_VAR_DECL_RE = re.compile(r'^\s*variable\s+"([A-Za-z0-9_]+)"\s*\{', re.MULTILINE)
 
 DS_SERVING_TRACKS = frozenset({"bqml_batch", "vertex_cpr_online", "both"})
+PROJECT_DELETION_POLICIES = frozenset({"PREVENT", "DELETE", "ABANDON"})
+LEGAL_ENTITY_SUFFIXES = frozenset({
+    "bhd",
+    "berhad",
+    "sdn",
+    "pte",
+    "ltd",
+    "limited",
+    "inc",
+    "incorporated",
+    "corp",
+    "corporation",
+    "llc",
+    "llp",
+    "plc",
+    "co",
+    "company",
+})
+OPTIONAL_GROUP_SUFFIXES = frozenset({"holdings", "holding", "group"})
+ENTERPRISE_TEAMS_KEYS = frozenset({
+    "cloudops_admins_group",
+    "finops_admins_group",
+    "network_admins_group",
+    "security_admins_group",
+    "secops_analysts_group",
+    "data_admins_group",
+    "ai_admins_group",
+    "app_admins_group",
+})
+APPLICATIONS_KEYS = frozenset({
+    "enable_apps",
+    "shared_artifact_registry",
+    "workloads",
+})
+APPLICATION_WORKLOAD_KEYS = frozenset({
+    "display_name",
+    "enable_cloud_run",
+    "enable_gke",
+    "enable_cloud_sql",
+    "admin_group",
+    "developer_group",
+})
 DATA_SCIENCE_CONFIG_KEYS = frozenset({
     "enable_data_science",
     "ds_serving_track",
@@ -84,6 +129,12 @@ REQUIRED_FIELDS = (
 DATA_SCIENCE_REQUIRED_FIELDS = (
     "ds_exp_project_id",
     "ml_ops_project_id",
+)
+
+APPS_REQUIRED_FIELDS = (
+    "prefix",
+    "region",
+    "environment",
 )
 
 FIELD_FLAGS = (
@@ -133,6 +184,16 @@ DATA_SCIENCE_FIELD_FLAGS = (
     "ds_serving_track",
 )
 
+APPS_FIELD_FLAGS = (
+    "billing_account",
+    "project_suffix",
+    "app_folder_id",
+    "shared_vpc_host_project_id",
+    "shared_artifact_registry_id",
+    "app_admins_group",
+    "project_deletion_policy",
+)
+
 BOOLEAN_LANDING_ZONE_KEYS = frozenset({"manage_kms_iam"})
 
 ALIAS_PAIRS = (
@@ -150,6 +211,7 @@ ALIAS_RHS_TO_LHS = {alias: primary for primary, alias in ALIAS_PAIRS}
 VALID_LANDING_ZONE_KEYS = (
     frozenset(FIELD_FLAGS)
     | frozenset(DATA_SCIENCE_FIELD_FLAGS)
+    | frozenset(APPS_FIELD_FLAGS)
     | frozenset(ALIAS_RHS_TO_LHS)
     | BOOLEAN_LANDING_ZONE_KEYS
 )
@@ -277,18 +339,79 @@ DATA_SCIENCE_DECLARED_VARS = frozenset({
 })
 
 
+# Mirrors gcp-foundation/apps/enterprise/variables.tf so --target apps emits only
+# declared Application Team Project Factory variables.
+APPS_DECLARED_VARS = frozenset({
+    "app_admins_group",
+    "app_folder_id",
+    "applications",
+    "auto_unique_suffix",
+    "billing_account",
+    "deletion_protection",
+    "enforce_vpc_sc",
+    "environment",
+    "environment_app_folder_ids",
+    "finops_tag_value_ids",
+    "kms_key_id",
+    "labels",
+    "manage_kms_iam",
+    "manage_vpc_sc",
+    "prefix",
+    "project_deletion_policy",
+    "project_suffix",
+    "propagation_wait_seconds",
+    "region",
+    "shared_artifact_registry_id",
+    "shared_vpc_host_project_id",
+    "subnet_id",
+    "vpc_id",
+    "vpc_sc_perimeter_name",
+})
+
+
+def suggest_company_acronym(org_name: str) -> str:
+    """Derive a 3-6 char lowercase company acronym from an organization name."""
+    words = [w.lower() for w in re.findall(r"[A-Za-z0-9]+", org_name)]
+    if not words:
+        raise ValueError("Organization name must contain alphanumeric words.")
+    core_indices = [i for i, w in enumerate(words) if w not in LEGAL_ENTITY_SUFFIXES]
+    if len(core_indices) < 3 and len(words) >= 3:
+        for i in range(len(words)):
+            if i not in core_indices:
+                core_indices.append(i)
+                if len(core_indices) == 3:
+                    break
+        core_indices.sort()
+    core = [words[i] for i in core_indices]
+    without_group = [w for w in core if w not in OPTIONAL_GROUP_SUFFIXES]
+    chosen = without_group if len(without_group) >= 3 else core
+    if not chosen:
+        chosen = words
+    initials = "".join(w[0] for w in chosen[:6])
+    if len(initials) < 3:
+        for ch in chosen[0][1:]:
+            if len(initials) >= 3:
+                break
+            initials += ch
+    initials = initials[:6]
+    if not initials[0].isalpha():
+        initials = ("c" + initials)[:6]
+    _validate_pattern("prefix", initials, PREFIX_RE)
+    return initials
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Generate 00_linked.auto.tfvars.json for brownfield "
-            "gcp-data-ingestion or gcp-data-science deployments."
+            "gcp-data-ingestion, gcp-data-science, or apps/enterprise deployments."
         )
     )
     parser.add_argument(
         "--target",
-        choices=("ingestion", "data-science"),
+        choices=("ingestion", "data-science", "apps"),
         default="ingestion",
-        help="Target downstream repository (default: ingestion).",
+        help="Target downstream repository or stage (default: ingestion).",
     )
     parser.add_argument(
         "--context",
@@ -299,9 +422,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--env",
         dest="env",
         default=None,
-        help="Target environment (dev, staging, prod) for by_environment resolution.",
+        help="Target environment (dev, uat, staging, prod) for by_environment resolution.",
     )
-    for field in FIELD_FLAGS + DATA_SCIENCE_FIELD_FLAGS:
+    parser.add_argument(
+        "--org-name",
+        dest="org_name",
+        default=None,
+        help="Organization name used to suggest/populate prefix when prefix is omitted.",
+    )
+    for field in FIELD_FLAGS + DATA_SCIENCE_FIELD_FLAGS + APPS_FIELD_FLAGS:
         flag = "--" + field.replace("_", "-")
         parser.add_argument(flag, dest=field, default=None)
     for _, alias in ALIAS_PAIRS:
@@ -374,7 +503,7 @@ def _validate_dataplex_scan(name: str, value: str) -> None:
 def _validate_environment(value: str) -> None:
     if not ENVIRONMENT_RE.match(value):
         raise ValueError(
-            f"Invalid environment '{value}': expected dev, staging, or prod"
+            f"Invalid environment '{value}': expected dev, uat, staging, or prod"
         )
 
 
@@ -506,6 +635,103 @@ def validate_data_science_config(payload: dict[str, object]) -> dict[str, object
     return ds_cfg
 
 
+def validate_finops_config(payload: dict[str, object]) -> dict[str, object]:
+    finops_cfg = payload.get("finops")
+    if not isinstance(finops_cfg, dict):
+        raise ValueError("finops must be a JSON object.")
+    dept_budgets = finops_cfg.get("department_budgets")
+    if dept_budgets is not None:
+        if not isinstance(dept_budgets, dict) or not dept_budgets:
+            raise ValueError("finops.department_budgets must be a non-empty JSON object.")
+        for dept, amt in dept_budgets.items():
+            if not isinstance(dept, str) or not dept.strip():
+                raise ValueError("finops.department_budgets keys must be non-empty strings.")
+            if isinstance(amt, bool) or not isinstance(amt, (int, float)) or amt <= 0:
+                raise ValueError(
+                    f"finops.department_budgets.{dept} must be a positive number."
+                )
+    return finops_cfg
+
+
+def validate_scc_config(payload: dict[str, object]) -> dict[str, object]:
+    scc_cfg = payload.get("scc")
+    if not isinstance(scc_cfg, dict):
+        raise ValueError("scc must be a JSON object.")
+    dedicated = scc_cfg.get("create_dedicated_secops_project")
+    if dedicated is not None and not isinstance(dedicated, bool):
+        raise ValueError(
+            f"scc.create_dedicated_secops_project must be a boolean, got {type(dedicated).__name__}"
+        )
+    return scc_cfg
+
+
+def validate_enterprise_teams_config(payload: dict[str, object]) -> dict[str, object]:
+    teams_cfg = payload.get("enterprise_teams")
+    if not isinstance(teams_cfg, dict):
+        raise ValueError("enterprise_teams must be a JSON object.")
+    if set(teams_cfg.keys()) != ENTERPRISE_TEAMS_KEYS:
+        missing = sorted(ENTERPRISE_TEAMS_KEYS - set(teams_cfg.keys()))
+        extra = sorted(set(teams_cfg.keys()) - ENTERPRISE_TEAMS_KEYS)
+        raise ValueError(
+            f"Invalid enterprise_teams keys (missing={missing}, extra={extra})."
+        )
+    for key, val in teams_cfg.items():
+        if not isinstance(val, str) or not val.strip():
+            raise ValueError(f"enterprise_teams.{key} must be a non-empty group email string.")
+        _validate_pattern(f"enterprise_teams.{key}", val.strip(), SA_EMAIL_RE)
+    return teams_cfg
+
+
+def validate_applications_config(payload: dict[str, object]) -> dict[str, object]:
+    apps_cfg = payload.get("applications")
+    if not isinstance(apps_cfg, dict):
+        raise ValueError("applications must be a JSON object.")
+    if set(apps_cfg.keys()) != APPLICATIONS_KEYS:
+        missing = sorted(APPLICATIONS_KEYS - set(apps_cfg.keys()))
+        extra = sorted(set(apps_cfg.keys()) - APPLICATIONS_KEYS)
+        raise ValueError(
+            f"Invalid applications keys (missing={missing}, extra={extra})."
+        )
+    for bool_key in ("enable_apps", "shared_artifact_registry"):
+        if not isinstance(apps_cfg[bool_key], bool):
+            raise ValueError(
+                f"applications.{bool_key} must be a boolean, got {type(apps_cfg[bool_key]).__name__}"
+            )
+    workloads = apps_cfg["workloads"]
+    if not isinstance(workloads, dict):
+        raise ValueError("applications.workloads must be a JSON object.")
+    for app_key, wl in workloads.items():
+        if not isinstance(app_key, str) or not app_key.strip():
+            raise ValueError("applications.workloads keys must be non-empty strings.")
+        if not isinstance(wl, dict):
+            raise ValueError(f"applications.workloads.{app_key} must be a JSON object.")
+        if set(wl.keys()) != APPLICATION_WORKLOAD_KEYS:
+            missing = sorted(APPLICATION_WORKLOAD_KEYS - set(wl.keys()))
+            extra = sorted(set(wl.keys()) - APPLICATION_WORKLOAD_KEYS)
+            raise ValueError(
+                f"Invalid applications.workloads.{app_key} keys (missing={missing}, extra={extra})."
+            )
+        if not isinstance(wl["display_name"], str) or not wl["display_name"].strip():
+            raise ValueError(f"applications.workloads.{app_key}.display_name must be a non-empty string.")
+        for wl_bool in ("enable_cloud_run", "enable_gke", "enable_cloud_sql"):
+            if not isinstance(wl[wl_bool], bool):
+                raise ValueError(
+                    f"applications.workloads.{app_key}.{wl_bool} must be a boolean."
+                )
+        for grp_key in ("admin_group", "developer_group"):
+            grp_val = wl[grp_key]
+            if not isinstance(grp_val, str) or not grp_val.strip():
+                raise ValueError(
+                    f"applications.workloads.{app_key}.{grp_key} must be a non-empty group email."
+                )
+            _validate_pattern(
+                f"applications.workloads.{app_key}.{grp_key}",
+                grp_val.strip(),
+                SA_EMAIL_RE,
+            )
+    return apps_cfg
+
+
 def load_context_values(
     context_path: Path, target_env: str | None = None
 ) -> dict[str, object]:
@@ -519,6 +745,17 @@ def load_context_values(
         _validate_environment(target_env)
 
     values: dict[str, object] = {}
+    if "finops" in payload and payload["finops"] is not None:
+        validate_finops_config(payload)
+    if "scc" in payload and payload["scc"] is not None:
+        validate_scc_config(payload)
+    if "enterprise_teams" in payload and payload["enterprise_teams"] is not None:
+        teams_cfg = validate_enterprise_teams_config(payload)
+        values["app_admins_group"] = str(teams_cfg["app_admins_group"]).strip()
+    if "applications" in payload and payload["applications"] is not None:
+        apps_cfg = validate_applications_config(payload)
+        if apps_cfg["enable_apps"]:
+            values["applications"] = apps_cfg["workloads"]
     if "data_science" in payload and payload["data_science"] is not None:
         ds_cfg = validate_data_science_config(payload)
         for ds_key in (
@@ -587,6 +824,7 @@ def load_context_values(
     top_level_mappings = (
         ("primary_region", "region"),
         ("prefix", "prefix"),
+        ("project_suffix", "project_suffix"),
     )
     for src_key, dst_key in top_level_mappings:
         raw_val = payload.get(src_key)
@@ -605,9 +843,12 @@ def load_context_values(
 
 
 def validate_inputs(values: dict[str, object], target: str = "ingestion") -> None:
-    required_fields = (
-        DATA_SCIENCE_REQUIRED_FIELDS if target == "data-science" else REQUIRED_FIELDS
-    )
+    if target == "data-science":
+        required_fields = DATA_SCIENCE_REQUIRED_FIELDS
+    elif target == "apps":
+        required_fields = APPS_REQUIRED_FIELDS
+    else:
+        required_fields = REQUIRED_FIELDS
     for required in required_fields:
         if not values.get(required):
             raise ValueError(f"Missing required brownfield field: {required}")
@@ -622,6 +863,7 @@ def validate_inputs(values: dict[str, object], target: str = "ingestion") -> Non
         "backup_project_id",
         "ds_exp_project_id",
         "ml_ops_project_id",
+        "shared_vpc_host_project_id",
     ):
         val = values.get(field)
         if isinstance(val, str) and val:
@@ -721,6 +963,22 @@ def validate_inputs(values: dict[str, object], target: str = "ingestion") -> Non
         _validate_pattern("environment", str(values["environment"]), ENVIRONMENT_RE)
     if values.get("prefix"):
         _validate_pattern("prefix", str(values["prefix"]), PREFIX_RE)
+    if values.get("project_suffix"):
+        _validate_pattern("project_suffix", str(values["project_suffix"]), PROJECT_SUFFIX_RE)
+    if values.get("billing_account"):
+        _validate_pattern("billing_account", str(values["billing_account"]), BILLING_ACCOUNT_RE)
+    if values.get("app_folder_id"):
+        _validate_pattern("app_folder_id", str(values["app_folder_id"]), FOLDER_ID_RE)
+    if values.get("shared_artifact_registry_id"):
+        _validate_ml_artifact_repo(str(values["shared_artifact_registry_id"]))
+    if values.get("app_admins_group"):
+        _validate_pattern("app_admins_group", str(values["app_admins_group"]), SA_EMAIL_RE)
+    if values.get("project_deletion_policy"):
+        pol = str(values["project_deletion_policy"])
+        if pol not in PROJECT_DELETION_POLICIES:
+            raise ValueError(
+                f"Invalid project_deletion_policy '{pol}': expected one of {sorted(PROJECT_DELETION_POLICIES)}"
+            )
     if values.get("domain_name"):
         _validate_pattern("domain_name", str(values["domain_name"]), DOMAIN_NAME_RE)
     if values.get("ds_serving_track"):
@@ -813,6 +1071,30 @@ def format_kms_binding_commands(
         )
         return commands
 
+    if target == "apps":
+        prefix = str(values.get("prefix") or "ent")
+        env_name = str(values.get("environment") or "dev")
+        commands = [
+            f"# CMEK preflight/remediation for apps/enterprise ({prefix}-{env_name}) on {kms_key_id}:",
+            "APP_PROJECT_NUMBER=\"$(gcloud projects describe '<APP_PROJECT_ID>' --format='value(projectNumber)')\"",
+        ]
+        members = [
+            "serviceAccount:service-${APP_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com",
+            "serviceAccount:service-${APP_PROJECT_NUMBER}@container-engine-robot.iam.gserviceaccount.com",
+            "serviceAccount:service-${APP_PROJECT_NUMBER}@gcp-sa-cloud-sql.iam.gserviceaccount.com",
+            "serviceAccount:service-${APP_PROJECT_NUMBER}@gcp-sa-artifactregistry.iam.gserviceaccount.com",
+            "serviceAccount:service-${APP_PROJECT_NUMBER}@compute-system.iam.gserviceaccount.com",
+        ]
+        commands.extend(
+            (
+                f"gcloud kms keys add-iam-policy-binding {kms_key} "
+                f"--project={kms_project} --location={kms_location} --keyring={kms_keyring} "
+                f"--member={member} --role=roles/cloudkms.cryptoKeyEncrypterDecrypter"
+            )
+            for member in members
+        )
+        return commands
+
     compute_project = values.get("compute_project_id")
     if not isinstance(compute_project, str) or not compute_project:
         raise ValueError("compute_project_id is required when --print-kms-commands is passed.")
@@ -846,6 +1128,45 @@ def format_kms_binding_commands(
 def format_shared_vpc_commands(
     values: dict[str, object], target: str = "ingestion"
 ) -> list[str]:
+    if target == "apps":
+        subnet_id = values.get("subnet_id")
+        if not isinstance(subnet_id, str) or not subnet_id:
+            return []
+        match = SUBNET_ID_RE.match(subnet_id)
+        if not match:
+            return []
+        host_project, region, subnet_name = match.groups()
+        explicit_host = values.get("shared_vpc_host_project_id")
+        if isinstance(explicit_host, str) and explicit_host:
+            host_project = explicit_host
+        return [
+            f"# Shared VPC preflight/remediation for apps/enterprise on subnet {subnet_name} (host {host_project}):",
+            "APP_PROJECT_NUMBER=\"$(gcloud projects describe '<APP_PROJECT_ID>' --format='value(projectNumber)')\"",
+            f"gcloud compute shared-vpc associated-projects add '<APP_PROJECT_ID>' --host-project='{host_project}'",
+            (
+                f"gcloud compute networks subnets add-iam-policy-binding '{subnet_name}' "
+                f"--project='{host_project}' --region='{region}' "
+                "--member=\"serviceAccount:service-${APP_PROJECT_NUMBER}@serverless-robot-prod.iam.gserviceaccount.com\" "
+                "--role=roles/compute.networkUser"
+            ),
+            (
+                f"gcloud compute networks subnets add-iam-policy-binding '{subnet_name}' "
+                f"--project='{host_project}' --region='{region}' "
+                "--member=\"serviceAccount:${APP_PROJECT_NUMBER}@cloudservices.gserviceaccount.com\" "
+                "--role=roles/compute.networkUser"
+            ),
+            (
+                f"gcloud compute networks subnets add-iam-policy-binding '{subnet_name}' "
+                f"--project='{host_project}' --region='{region}' "
+                "--member=\"serviceAccount:service-${APP_PROJECT_NUMBER}@container-engine-robot.iam.gserviceaccount.com\" "
+                "--role=roles/compute.networkUser"
+            ),
+            (
+                f"gcloud projects add-iam-policy-binding '{host_project}' "
+                "--member=\"serviceAccount:service-${APP_PROJECT_NUMBER}@container-engine-robot.iam.gserviceaccount.com\" "
+                "--role=roles/container.hostServiceAgentUser"
+            ),
+        ]
     if target != "data-science":
         return []
     subnet_id = values.get("egress_connector_subnet_id")
@@ -897,11 +1218,20 @@ def build_linked_tfvars(
         )
     elif target == "data-science":
         declared = DATA_SCIENCE_DECLARED_VARS
+    elif target == "apps":
+        declared = APPS_DECLARED_VARS
     else:
         declared = INGESTION_DECLARED_VARS
 
     if target == "data-science" and "create_ml_audit_ledger_table" not in linked:
         linked["create_ml_audit_ledger_table"] = True
+
+    if target == "apps" and "shared_vpc_host_project_id" not in linked:
+        subnet_val = linked.get("subnet_id")
+        if isinstance(subnet_val, str):
+            sub_match = SUBNET_ID_RE.match(subnet_val)
+            if sub_match:
+                linked["shared_vpc_host_project_id"] = sub_match.group(1)
 
     linked = {k: v for k, v in linked.items() if k in declared}
     return dict(sorted(linked.items()))
@@ -970,7 +1300,7 @@ def main(argv: list[str] | None = None) -> int:
         elif target_env is not None:
             values["environment"] = target_env
 
-        for field in FIELD_FLAGS + DATA_SCIENCE_FIELD_FLAGS:
+        for field in FIELD_FLAGS + DATA_SCIENCE_FIELD_FLAGS + APPS_FIELD_FLAGS:
             if field == "environment":
                 continue
             cli_val = getattr(args, field, None)
@@ -980,6 +1310,13 @@ def main(argv: list[str] | None = None) -> int:
                     values[field] = cleaned
                 else:
                     values.pop(field, None)
+
+        if args.org_name is not None and not values.get("prefix"):
+            suggested_prefix = suggest_company_acronym(args.org_name)
+            values["prefix"] = suggested_prefix
+            print(
+                f"Suggested prefix '{suggested_prefix}' from organization name '{args.org_name}'."
+            )
 
         for primary, alias in ALIAS_PAIRS:
             cli_val = getattr(args, alias, None)

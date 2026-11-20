@@ -52,8 +52,22 @@ Complete architecture intake and create isolated private repositories before pro
 4. Create private customer clones with `gh repo create <org>/<repo> --private --template choo737/<template> --clone`.
 5. Run `gh repo view --json isPrivate --jq '.isPrivate'` in every clone and confirm `true`.
 6. Update `CODEOWNERS` with customer team slugs and protect `main` with required pull request reviews.
-7. Create `dev`, `staging`, and `prod` GitHub Environments and require human reviewers on `prod`.
-8. Deploy `gcp-foundation/foundation/00-bootstrap` with `enable_github_wif = true`, `github_org`, and `ci_repository_map` (`tf_foundation_ci`, `tf_ingestion_ci`, `dataform_ci`).
+7. Create `dev`, `uat`, `staging`, and `prod` GitHub Environments and require human reviewers on `prod`.
+8. Deploy `gcp-foundation/foundation/00-bootstrap` with `enable_github_wif = true`, `github_org`, and `ci_repository_map` (`tf_foundation_ci`, `tf_ingestion_ci`, `dataform_ci`, `tf_ds_ci`, `tf_app_ci`).
+
+### 7-Team Governance & `Environment -> Department` Hierarchy
+
+Isolate folders by `Environment -> Department` (`dev`, `uat`, `staging`, `prod` -> `data`, `ai`, `app`, `shared`) across seven teams:
+
+| Enterprise Team | Context Group Key | Folder / Project Scope |
+| --- | --- | --- |
+| CloudOps | `cloudops_admins_group` | Org policies, audit logs, and shared folders |
+| FinOps | `finops_admins_group` | `<prefix>-cmn-finops`, `department_budgets`, billing export |
+| Network | `network_admins_group` | Shared VPC, subnets, Cloud NGFW, and VPC-SC |
+| Security & SecOps | `security_admins_group`, `secops_analysts_group` | Cloud KMS, SCC findings, optional `<prefix>-cmn-secops` |
+| Data | `data_admins_group` | `data/` department folders, BigQuery, and Dataform |
+| AI | `ai_admins_group` | `ai/` department folders, Vertex AI, and ML Ops |
+| App | `app_admins_group` | `app/` department folders and `apps/enterprise` workloads |
 
 | GitHub Variable | Scope | Purpose |
 | --- | --- | --- |
@@ -63,6 +77,7 @@ Complete architecture intake and create isolated private repositories before pro
 | `GCP_NET_SEC_WIF_SA` | Repo / Environment | Optional Tier-L WIF SA for `02-security-network` |
 | `GCP_DATA_PLAT_WIF_SA` | Repo / Environment | Optional Tier-L WIF SA for `data/sandbox` and `data/enterprise/*` |
 | `GCP_DS_WIF_SA` | Repo / Environment | Dedicated WIF SA for `gcp-data-science` (`tf_ds_ci`) |
+| `GCP_APP_WIF_SA` | Repo / Environment | Dedicated WIF SA for `apps/enterprise` (`tf_app_ci`) |
 | `GCP_TFSTATE_BUCKET` | Repo / Environment | Remote GCS Terraform state bucket |
 | `IAC_OUTPUTS_BUCKET` | Repo / Environment | Non-sensitive `foundation-outputs.json` GCS bucket |
 | `ARTIFACT_REGISTRY_REPOSITORY` | Repo / Environment | Container registry path for `gcs_to_bronze` |
@@ -100,15 +115,21 @@ Provision the Greenfield landing zone in `gcp-foundation`, or run the Brownfield
 ./scripts/link-stages.sh --env <env> foundation/02-security-network data/enterprise/01-platform data/enterprise/03-data-science
 ```
 
-6. Export non-sensitive stage outputs per environment to Cloud Storage using `scripts/link-stages.sh`.
+6. Link `foundation/01-org-governance` and `foundation/02-security-network` into `apps/enterprise` when `applications.enable_apps = true`.
+
+```bash
+./scripts/link-stages.sh --env <env> foundation/01-org-governance foundation/02-security-network apps/enterprise
+```
+
+7. Export non-sensitive stage outputs per environment to Cloud Storage using `scripts/link-stages.sh`.
 
 ```bash
 ./scripts/link-stages.sh --env <env> \
   --export-gcs gs://<iac-outputs-bucket>/foundation-outputs.json \
-  foundation/02-security-network data/enterprise/01-platform data/enterprise/02-governance-ops data/enterprise/03-data-science
+  foundation/02-security-network data/enterprise/01-platform data/enterprise/02-governance-ops data/enterprise/03-data-science apps/enterprise
 ```
 
-7. Inspect `DRY_RUN` VPC-SC logs in Log Analytics, update ingress rules, then flip `enforce_vpc_sc = true` (`DRY_RUN -> ENFORCED`).
+8. Inspect `DRY_RUN` VPC-SC logs in Log Analytics, update ingress rules, then flip `enforce_vpc_sc = true` (`DRY_RUN -> ENFORCED`).
 
 ### Option B: Brownfield Bridge (`gcp-launchpad`)
 
@@ -137,7 +158,20 @@ python3 scripts/generate-brownfield-link.py \
   --output ../gcp-data-science/stages/enterprise/00_linked.auto.tfvars.json
 ```
 
-5. Verify every emitted `00_linked.auto.tfvars.json` has `0600` file permissions and remains gitignored.
+5. For `apps/enterprise`, run with `--target apps`, `--no-manage-kms-iam`, and `--print-kms-commands` to emit Shared VPC and CMEK commands.
+
+```bash
+python3 scripts/generate-brownfield-link.py \
+  --context platform-context.json \
+  --env dev \
+  --target apps \
+  --no-manage-kms-iam \
+  --print-kms-commands \
+  --target-variables-tf ../gcp-foundation/apps/enterprise/variables.tf \
+  --output ../gcp-foundation/apps/enterprise/00_linked.auto.tfvars.json
+```
+
+6. Verify every emitted `00_linked.auto.tfvars.json` has `0600` file permissions and remains gitignored.
 
 ## Step 3 — Day 1B: Ingestion Rollout (`gcp-data-ingestion`)
 

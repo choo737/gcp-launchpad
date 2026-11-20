@@ -33,12 +33,13 @@ Never guess resource IDs, service account emails, or policy tag paths.
 1. Confirm every discovered ID with the user before writing files.
 2. Populate `existing_landing_zone` inside gitignored `platform-context.json`.
 3. Include required fields: `core_project_id`, `compute_project_id`, `bronze_dataset_id`, `landing_bucket_name`, and `dataform_repository_name`.
-4. Add `by_environment` (`dev`, `staging`, `prod`) inside `existing_landing_zone` when environments use distinct projects or buckets.
+4. Add `by_environment` (`dev`, `uat`, `staging`, `prod`) inside `existing_landing_zone` when environments use distinct projects or buckets.
 5. Add optional `Dataform`, `Dataplex`, and `Datastream` fields (`dataform_release_config_name`, `dataplex_profile_scan_id`, `dataplex_quality_scan_id`, `datastream_network_attachment_id`).
 6. Add optional `BackupVault`, `KMS`, VPC, and policy tag fields (`backup_project_id`, `backup_vault_id`, `kms_key_id`, `vpc_id`, `subnet_id`, `pii_restricted_policy_tag_id`, `pii_masked_policy_tag_id`).
 7. Add Data Science fields (`ds_exp_project_id`, `ml_ops_project_id`, `ml_artifact_repo_id`, `ml_audit_dataset_id`, `ml_audit_table_id`, `ml_worm_bucket_name`, `silver_dataset_id`) when linking `gcp-data-science`.
+8. Add `applications`, `enterprise_teams.app_admins_group`, `billing_account`, `app_folder_id`, `shared_vpc_host_project_id`, and `shared_artifact_registry_id` for `--target apps`.
 
-## Step 3: Generate `00_linked.auto.tfvars.json` for Ingestion or Data Science
+## Step 3: Generate `00_linked.auto.tfvars.json` for Ingestion, Data Science, or Apps
 
 Run `scripts/generate-brownfield-link.py` with `--env` targeting `gcp-data-ingestion/stages/enterprise`:
 
@@ -65,9 +66,22 @@ python3 scripts/generate-brownfield-link.py \
 
 Verify the generated file has mode `0600` and contains only declared variables.
 
+Run with `--target apps` targeting `gcp-foundation/apps/enterprise` and `--print-kms-commands` for Shared VPC and CMEK commands:
+
+```bash
+python3 scripts/generate-brownfield-link.py \
+  --context platform-context.json \
+  --env dev \
+  --target apps \
+  --no-manage-kms-iam \
+  --print-kms-commands \
+  --output ../<customer-foundation-repo>/apps/enterprise/00_linked.auto.tfvars.json
+```
+
 When `egress_connector_subnet_id` references a Shared VPC subnet, attach `ml_ops_project_id` as a service project.
 Grant `roles/compute.networkUser` on that subnet to `service-<ML_OPS_PROJECT_NUMBER>@serverless-robot-prod.iam.gserviceaccount.com`.
-`generate-brownfield-link.py` prints these Shared VPC preflight commands automatically for `--target data-science`.
+For `--target apps`, grant `roles/compute.networkUser` to `serverless-robot-prod` and `container-engine-robot` plus `roles/container.hostServiceAgentUser` on the host project.
+`generate-brownfield-link.py` prints these Shared VPC preflight commands automatically for `--target data-science` and `--target apps`.
 
 ## Step 4: Configure `gcp-data-medallion` Compilation Inputs
 

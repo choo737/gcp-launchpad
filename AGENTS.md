@@ -17,11 +17,13 @@ Never create `GEMINI.md` or `catalog.yaml`.
 ## Routing & Bridge Workflow
 
 1. Walk the user through [QUESTIONNAIRE.md](QUESTIONNAIRE.md) before cloning repositories or running cloud commands.
-2. Run `scripts/preflight-check.sh` to verify local tools, active `gcloud` identity, and GitHub CLI auth.
-3. Save answers to gitignored `platform-context.json` matching `examples/platform-context.greenfield.json` or `examples/platform-context.brownfield.json`.
-4. Always create private customer repositories using `gh repo create <owner>/<repo> --private --template choo737/<template> --clone`.
-5. For Brownfield setups, run `scripts/generate-brownfield-link.py` (`--target ingestion` or `--target data-science`) for `00_linked.auto.tfvars.json` (`0600`).
-6. Follow [docs/01-end-to-end-operational-playbook.md](docs/01-end-to-end-operational-playbook.md) for cross-repository Day-0, Day-1, and Day-2 handoffs.
+2. Derive and suggest a `3-6` char company acronym `prefix` (strip legal suffixes like `Ltd`, `Group`), then confirm.
+3. Run `scripts/preflight-check.sh` to verify local tools, active `gcloud` identity, and GitHub CLI auth.
+4. Save answers to gitignored `platform-context.json` matching `examples/platform-context.greenfield.json` or `examples/platform-context.brownfield.json`.
+5. Set `auto_unique_suffix = true` when no manual `project_suffix` is provided so Terraform appends a 4-char unique code.
+6. Always create private customer repositories using `gh repo create <owner>/<repo> --private --template choo737/<template> --clone`.
+7. For Brownfield setups, run `scripts/generate-brownfield-link.py` (`--target ingestion`, `--target data-science`, or `--target apps`) (`0600`).
+8. Follow [docs/01-end-to-end-operational-playbook.md](docs/01-end-to-end-operational-playbook.md) for cross-repository Day-0, Day-1, and Day-2 handoffs.
 
 ## Security & Prose Rules
 
