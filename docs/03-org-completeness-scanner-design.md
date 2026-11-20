@@ -43,7 +43,7 @@ Check `D16` verifies Layer-`04` Data Science and regulated Explainable AI contro
 
 | ID | Diagram Area | Layer | GCP APIs Queried | Expected Signals |
 | --- | --- | --- | --- | --- |
-| `D00` | Bedrock | `01` | Resource Manager (`folders`, `projects`) | `02-environments` folders, core, compute, governance projects |
+| `D00` | Bedrock | `01` | Resource Manager (`folders`, `projects`) | `environments` folders, core, compute, governance projects |
 | `D01` | City hall | `01` | Cloud IAM, Org Policy v2, Billing Budgets | Group bindings, 36 Org Policies, active budgets |
 | `D02` | Power substation | `01` | Compute Engine, Cloud DNS | Shared VPC host, private subnets, Cloud NAT |
 | `D03` | Underground wiring | `01` | Cloud KMS (`keyRings`, `cryptoKeys`) | Regional CMEK rings and 90-day rotation |
