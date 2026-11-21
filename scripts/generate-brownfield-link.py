@@ -657,6 +657,11 @@ def validate_scc_config(payload: dict[str, object]) -> dict[str, object]:
     scc_cfg = payload.get("scc")
     if not isinstance(scc_cfg, dict):
         raise ValueError("scc must be a JSON object.")
+    scc_scope = scc_cfg.get("scc_scope")
+    if scc_scope is not None and scc_scope not in ("ORGANIZATION", "FOLDER", "PROJECT"):
+        raise ValueError(
+            "scc.scc_scope must be one of ORGANIZATION, FOLDER, or PROJECT."
+        )
     dedicated = scc_cfg.get("create_dedicated_secops_project")
     if dedicated is not None and not isinstance(dedicated, bool):
         raise ValueError(

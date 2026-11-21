@@ -78,7 +78,7 @@
   },
   "scc": {
     "scc_tier": "PREMIUM",
-    "scc_scope": "FOLDER",
+    "scc_scope": "ORGANIZATION",
     "create_dedicated_secops_project": true,
     "enable_audit_cmek": true,
     "scc_alert_email_addresses": [

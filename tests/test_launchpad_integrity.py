@@ -539,7 +539,7 @@ class LaunchpadIntegrityTest(unittest.TestCase):
                     },
                 )
                 self.assertIn(scc["scc_tier"], ("NONE", "STANDARD", "PREMIUM"))
-                self.assertIn(scc["scc_scope"], ("FOLDER", "PROJECT"))
+                self.assertIn(scc["scc_scope"], ("ORGANIZATION", "FOLDER", "PROJECT"))
                 self.assertIsInstance(scc["create_dedicated_secops_project"], bool)
                 self.assertIsInstance(scc["enable_audit_cmek"], bool)
                 self.assertIsInstance(scc["scc_alert_email_addresses"], list)

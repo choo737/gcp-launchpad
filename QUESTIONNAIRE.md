@@ -51,7 +51,7 @@ Select one compliance profile for audit retention, key protection, FinOps, backu
 | Backup & DR Vault Retention | Disabled (`false`) | `14` days (`lock = false`) | `30` days (`lock = false`) |
 | GCS Soft Delete Policy | `7` days | `14` days | `30` days |
 | Cloud NGFW Tier | `Essentials` | `NGFW Standard` | `NGFW Standard` (`NGFW Enterprise` opt-in) |
-| SCC Tier & Scope | `NONE` | `STANDARD` (`FOLDER`/`PROJECT`) | `PREMIUM` + Runtime Detectors |
+| SCC Tier & Scope | `NONE` | `STANDARD` (`ORGANIZATION`/`FOLDER`/`PROJECT`) | `PREMIUM` + Runtime Detectors |
 | VPC-SC | `Disabled` | `DRY_RUN` non-prod / `ENFORCED` prod | `DRY_RUN` non-prod / `ENFORCED` prod |
 
 ### Pillar 1: FinOps Governance & Billing Export
@@ -95,7 +95,7 @@ Enforce layered firewall policies with IAM-governed workload tags.
 Configure threat detection, finding exports, and security operations routing.
 
 - **`scc_tier`**: Choose `NONE`, `STANDARD`, or `PREMIUM`. Note that `SCC Enterprise` retires May 21, 2027.
-- **`scc_scope`**: Choose `FOLDER` activation versus `PROJECT` pay-as-you-go (`PAYG`) coverage.
+- **`scc_scope`**: Choose `ORGANIZATION`, `FOLDER`, or `PROJECT` pay-as-you-go (`PAYG`) coverage.
 - **`create_dedicated_secops_project`**: Set `true` for `<prefix>-cmn-secops` isolation, or `false` to colocate inside `<prefix>-audit`.
 - **Organization ID (`organization_id`)**: Required for `PREMIUM` Security Posture or custom ETD modules even when `scc_scope = "FOLDER"`.
 - **Audit KMS CMEK (`enable_audit_cmek`)**: Encrypt `<prefix>_scc_findings` BigQuery exports and Pub/Sub topics using Stage-01 Audit KMS keys.
