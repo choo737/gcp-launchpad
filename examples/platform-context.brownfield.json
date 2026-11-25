@@ -1,0 +1,238 @@
+{
+  "schema_version": "1.0",
+  "adoption_mode": "brownfield",
+  "compliance_profile": "enterprise_standard",
+  "team_size_tier": "M",
+  "github_plan": "github_team",
+  "selected_templates": [
+    "gcp-data-ingestion",
+    "gcp-data-medallion",
+    "gcp-data-science"
+  ],
+  "primary_region": "asia-southeast1",
+  "dr_region": "",
+  "environments": [
+    "dev",
+    "uat",
+    "prod"
+  ],
+  "prefix": "acme",
+  "project_suffix": "a1b2",
+  "github_owner": "example-org",
+  "ci_identity_mode": "github_oidc_wif",
+  "finops": {
+    "create_dedicated_finops_project": true,
+    "finops_billing_export_location": "US",
+    "monthly_budget_amount": 5000,
+    "environment_budgets": {
+      "dev": 500,
+      "uat": 1500,
+      "prod": 3000
+    },
+    "department_budgets": {
+      "data": 1500,
+      "ai": 1000,
+      "app": 2000,
+      "shared": 500
+    },
+    "workload_budgets": {
+      "data-platform": {
+        "amount": 2500,
+        "projects": [
+          "projects/1000000001"
+        ],
+        "labels": {},
+        "alert_emails": [
+          "data-platform-owners@example.com"
+        ]
+      }
+    },
+    "budget_thresholds": [
+      0.5,
+      0.8,
+      0.9,
+      1.0
+    ],
+    "enable_forecasted_threshold": true,
+    "finops_alert_email_addresses": [
+      "gcp-finops-alerts@example.com",
+      "gcp-billing-admins@example.com"
+    ]
+  },
+  "backup_dr": {
+    "enable_backup_dr": true,
+    "backup_enforced_retention_days": 14,
+    "lock_backup_vault": false,
+    "soft_delete_retention_seconds": 1209600,
+    "enable_dual_region_gcs": false,
+    "gcs_rpo": "DEFAULT",
+    "cross_border_dual_region_approved": false,
+    "bq_dr_mode": "time_travel_only"
+  },
+  "ngfw": {
+    "enable_hierarchical_firewall_policy": true,
+    "enable_ngfw_standard_rules": true,
+    "enable_secure_tags": true,
+    "enable_ngfw_enterprise": false
+  },
+  "scc": {
+    "scc_tier": "STANDARD",
+    "scc_scope": "FOLDER",
+    "create_dedicated_secops_project": false,
+    "enable_audit_cmek": true,
+    "scc_alert_email_addresses": [
+      "gcp-secops-alerts@example.com"
+    ],
+    "runtime_detectors": []
+  },
+  "data_science": {
+    "enable_data_science": true,
+    "ds_serving_track": "vertex_cpr_online",
+    "enable_ds_workbench": false,
+    "enable_colab_enterprise": false,
+    "enable_online_feature_store": true,
+    "xai_audit_retention_days": 365,
+    "shap_additivity_tolerance": 0.00001,
+    "fairness_min_disparate_impact": 0.80
+  },
+  "enterprise_teams": {
+    "cloudops_admins_group": "grp-cloudops-admins@example.com",
+    "finops_admins_group": "grp-finops-admins@example.com",
+    "network_admins_group": "grp-network-admins@example.com",
+    "security_admins_group": "grp-security-admins@example.com",
+    "secops_analysts_group": "grp-secops-analysts@example.com",
+    "data_admins_group": "grp-data-admins@example.com",
+    "ai_admins_group": "grp-ai-admins@example.com",
+    "app_admins_group": "grp-app-admins@example.com"
+  },
+  "applications": {
+    "enable_apps": true,
+    "shared_artifact_registry": true,
+    "workloads": {
+      "app1": {
+        "display_name": "APP 1",
+        "enable_cloud_run": true,
+        "enable_gke": false,
+        "enable_cloud_sql": false,
+        "admin_group": "grp-app1-admins@example.com",
+        "developer_group": "grp-app1-devs@example.com"
+      }
+    }
+  },
+  "existing_landing_zone": {
+    "environment": "dev",
+    "region": "asia-southeast1",
+    "prefix": "acme",
+    "billing_account": "000000-000000-000000",
+    "app_folder_id": "1000000001",
+    "core_project_id": "prj-dev-data-core-9f2a",
+    "compute_project_id": "prj-dev-data-core-9f2a",
+    "analytics_project_id": "prj-dev-data-gold-9f2a",
+    "bi_project_id": "prj-dev-data-bi-9f2a",
+    "governance_project_id": "prj-dev-data-gov-9f2a",
+    "finops_project_id": "prj-coe-finops-a1b2",
+    "backup_project_id": "prj-coe-backup-a1b2",
+    "backup_vault_id": "projects/prj-coe-backup-a1b2/locations/asia-southeast1/backupVaults/acme-vault-01",
+    "bronze_dataset_id": "bronze",
+    "silver_dataset_id": "silver",
+    "gold_dataset_id": "gold",
+    "quarantine_dataset_id": "quarantine",
+    "assertions_dataset_id": "silver_assertions",
+    "ops_telemetry_dataset_id": "ops_telemetry",
+    "landing_bucket_name": "acme-dev-raw-landing-9f2a",
+    "dataform_repository_name": "medallion-repo",
+    "dataform_release_config_name": "dev-main",
+    "dataform_sa_email": "sa-dataform@prj-dev-data-core-9f2a.iam.gserviceaccount.com",
+    "batch_loader_sa_email": "sa-batch-loader@prj-dev-data-core-9f2a.iam.gserviceaccount.com",
+    "pubsub_writer_sa_email": "sa-pubsub-writer@prj-dev-data-core-9f2a.iam.gserviceaccount.com",
+    "kms_key_id": "projects/prj-dev-data-gov-9f2a/locations/asia-southeast1/keyRings/data-ring/cryptoKeys/data-cmek",
+    "pii_restricted_policy_tag_id": "projects/prj-dev-data-gov-9f2a/locations/asia-southeast1/taxonomies/1000000001/policyTags/2000000001",
+    "pii_masked_policy_tag_id": "projects/prj-dev-data-gov-9f2a/locations/asia-southeast1/taxonomies/1000000001/policyTags/2000000002",
+    "vpc_id": "projects/prj-dev-network-9f2a/global/networks/acme-shared-vpc",
+    "subnet_id": "projects/prj-dev-network-9f2a/regions/asia-southeast1/subnetworks/acme-etl-subnet",
+    "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/prj-dev-data-core-9f2a/ingestion-containers",
+    "ds_exp_project_id": "prj-dev-ds-exp-9f2a",
+    "ml_ops_project_id": "prj-dev-ml-ops-9f2a",
+    "ml_artifact_repo_id": "projects/prj-dev-ml-ops-9f2a/locations/asia-southeast1/repositories/ml-models",
+    "ml_audit_dataset_id": "ml_xai_audit",
+    "ml_audit_table_id": "ml_xai_audit_ledger",
+    "ml_worm_bucket_name": "acme-dev-ml-worm-9f2a",
+    "by_environment": {
+      "dev": {
+        "core_project_id": "prj-dev-data-core-9f2a",
+        "compute_project_id": "prj-dev-data-core-9f2a",
+        "analytics_project_id": "prj-dev-data-gold-9f2a",
+        "bi_project_id": "prj-dev-data-bi-9f2a",
+        "governance_project_id": "prj-dev-data-gov-9f2a",
+        "finops_project_id": "prj-coe-finops-a1b2",
+        "backup_project_id": "prj-coe-backup-a1b2",
+        "backup_vault_id": "projects/prj-coe-backup-a1b2/locations/asia-southeast1/backupVaults/acme-vault-01",
+        "landing_bucket_name": "acme-dev-raw-landing-9f2a",
+        "dataform_release_config_name": "dev-main",
+        "dataform_sa_email": "sa-dataform@prj-dev-data-core-9f2a.iam.gserviceaccount.com",
+        "batch_loader_sa_email": "sa-batch-loader@prj-dev-data-core-9f2a.iam.gserviceaccount.com",
+        "pubsub_writer_sa_email": "sa-pubsub-writer@prj-dev-data-core-9f2a.iam.gserviceaccount.com",
+        "kms_key_id": "projects/prj-dev-data-gov-9f2a/locations/asia-southeast1/keyRings/data-ring/cryptoKeys/data-cmek",
+        "pii_restricted_policy_tag_id": "projects/prj-dev-data-gov-9f2a/locations/asia-southeast1/taxonomies/1000000001/policyTags/2000000001",
+        "pii_masked_policy_tag_id": "projects/prj-dev-data-gov-9f2a/locations/asia-southeast1/taxonomies/1000000001/policyTags/2000000002",
+        "vpc_id": "projects/prj-dev-network-9f2a/global/networks/acme-shared-vpc",
+        "subnet_id": "projects/prj-dev-network-9f2a/regions/asia-southeast1/subnetworks/acme-etl-subnet",
+        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/prj-dev-data-core-9f2a/ingestion-containers",
+        "ds_exp_project_id": "prj-dev-ds-exp-9f2a",
+        "ml_ops_project_id": "prj-dev-ml-ops-9f2a",
+        "ml_artifact_repo_id": "projects/prj-dev-ml-ops-9f2a/locations/asia-southeast1/repositories/ml-models",
+        "ml_worm_bucket_name": "acme-dev-ml-worm-9f2a"
+      },
+      "uat": {
+        "core_project_id": "prj-uat-data-core-3b7e",
+        "compute_project_id": "prj-uat-data-core-3b7e",
+        "analytics_project_id": "prj-uat-data-gold-3b7e",
+        "bi_project_id": "prj-uat-data-bi-3b7e",
+        "governance_project_id": "prj-uat-data-gov-3b7e",
+        "finops_project_id": "prj-coe-finops-a1b2",
+        "backup_project_id": "prj-coe-backup-a1b2",
+        "backup_vault_id": "projects/prj-coe-backup-a1b2/locations/asia-southeast1/backupVaults/acme-vault-01",
+        "landing_bucket_name": "acme-uat-raw-landing-3b7e",
+        "dataform_release_config_name": "uat-main",
+        "dataform_sa_email": "sa-dataform@prj-uat-data-core-3b7e.iam.gserviceaccount.com",
+        "batch_loader_sa_email": "sa-batch-loader@prj-uat-data-core-3b7e.iam.gserviceaccount.com",
+        "pubsub_writer_sa_email": "sa-pubsub-writer@prj-uat-data-core-3b7e.iam.gserviceaccount.com",
+        "kms_key_id": "projects/prj-uat-data-gov-3b7e/locations/asia-southeast1/keyRings/data-ring/cryptoKeys/data-cmek",
+        "pii_restricted_policy_tag_id": "projects/prj-uat-data-gov-3b7e/locations/asia-southeast1/taxonomies/1000000002/policyTags/2000000001",
+        "pii_masked_policy_tag_id": "projects/prj-uat-data-gov-3b7e/locations/asia-southeast1/taxonomies/1000000002/policyTags/2000000002",
+        "vpc_id": "projects/prj-uat-network-3b7e/global/networks/acme-shared-vpc",
+        "subnet_id": "projects/prj-uat-network-3b7e/regions/asia-southeast1/subnetworks/acme-etl-subnet",
+        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/prj-uat-data-core-3b7e/ingestion-containers",
+        "ds_exp_project_id": "prj-uat-ds-exp-3b7e",
+        "ml_ops_project_id": "prj-uat-ml-ops-3b7e",
+        "ml_artifact_repo_id": "projects/prj-uat-ml-ops-3b7e/locations/asia-southeast1/repositories/ml-models",
+        "ml_worm_bucket_name": "acme-uat-ml-worm-3b7e"
+      },
+      "prod": {
+        "core_project_id": "prj-prod-data-core-c41b",
+        "compute_project_id": "prj-prod-data-core-c41b",
+        "analytics_project_id": "prj-prod-data-gold-c41b",
+        "bi_project_id": "prj-prod-data-bi-c41b",
+        "governance_project_id": "prj-prod-data-gov-c41b",
+        "finops_project_id": "prj-coe-finops-a1b2",
+        "backup_project_id": "prj-coe-backup-a1b2",
+        "backup_vault_id": "projects/prj-coe-backup-a1b2/locations/asia-southeast1/backupVaults/acme-vault-01",
+        "landing_bucket_name": "acme-prod-raw-landing-c41b",
+        "dataform_release_config_name": "prod-main",
+        "dataform_sa_email": "sa-dataform@prj-prod-data-core-c41b.iam.gserviceaccount.com",
+        "batch_loader_sa_email": "sa-batch-loader@prj-prod-data-core-c41b.iam.gserviceaccount.com",
+        "pubsub_writer_sa_email": "sa-pubsub-writer@prj-prod-data-core-c41b.iam.gserviceaccount.com",
+        "kms_key_id": "projects/prj-prod-data-gov-c41b/locations/asia-southeast1/keyRings/data-ring/cryptoKeys/data-cmek",
+        "pii_restricted_policy_tag_id": "projects/prj-prod-data-gov-c41b/locations/asia-southeast1/taxonomies/1000000003/policyTags/2000000001",
+        "pii_masked_policy_tag_id": "projects/prj-prod-data-gov-c41b/locations/asia-southeast1/taxonomies/1000000003/policyTags/2000000002",
+        "vpc_id": "projects/prj-prod-network-c41b/global/networks/acme-shared-vpc",
+        "subnet_id": "projects/prj-prod-network-c41b/regions/asia-southeast1/subnetworks/acme-etl-subnet",
+        "artifact_registry_repository_uri": "asia-southeast1-docker.pkg.dev/prj-prod-data-core-c41b/ingestion-containers",
+        "ds_exp_project_id": "prj-prod-ds-exp-c41b",
+        "ml_ops_project_id": "prj-prod-ml-ops-c41b",
+        "ml_artifact_repo_id": "projects/prj-prod-ml-ops-c41b/locations/asia-southeast1/repositories/ml-models",
+        "ml_worm_bucket_name": "acme-prod-ml-worm-c41b"
+      }
+    }
+  }
+}

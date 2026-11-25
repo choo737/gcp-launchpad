@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "adoption_mode": "greenfield",
+  "compliance_profile": "regulated_fsi_rmit",
+  "team_size_tier": "L",
+  "github_plan": "github_enterprise",
+  "selected_templates": [
+    "gcp-foundation",
+    "gcp-data-ingestion",
+    "gcp-data-medallion",
+    "gcp-data-science"
+  ],
+  "primary_region": "asia-southeast1",
+  "dr_region": "asia-southeast2",
+  "environments": [
+    "dev",
+    "uat",
+    "prod"
+  ],
+  "prefix": "acme",
+  "project_suffix": "",
+  "github_owner": "example-org",
+  "ci_identity_mode": "github_oidc_wif",
+  "finops": {
+    "create_dedicated_finops_project": true,
+    "finops_billing_export_location": "asia-southeast1",
+    "monthly_budget_amount": 10000,
+    "environment_budgets": {
+      "dev": 1500,
+      "uat": 2500,
+      "prod": 6000
+    },
+    "department_budgets": {
+      "data": 1500,
+      "ai": 1000,
+      "app": 2000,
+      "shared": 500
+    },
+    "workload_budgets": {
+      "data-platform": {
+        "amount": 5000,
+        "projects": [
+          "projects/1000000001"
+        ],
+        "labels": {},
+        "alert_emails": [
+          "data-platform-owners@example.com"
+        ]
+      }
+    },
+    "budget_thresholds": [
+      0.5,
+      0.8,
+      0.9,
+      1.0
+    ],
+    "enable_forecasted_threshold": true,
+    "finops_alert_email_addresses": [
+      "gcp-finops-alerts@example.com",
+      "gcp-billing-admins@example.com"
+    ]
+  },
+  "backup_dr": {
+    "enable_backup_dr": true,
+    "backup_enforced_retention_days": 30,
+    "lock_backup_vault": false,
+    "soft_delete_retention_seconds": 2592000,
+    "enable_dual_region_gcs": false,
+    "gcs_rpo": "DEFAULT",
+    "cross_border_dual_region_approved": true,
+    "bq_dr_mode": "cross_region_replica"
+  },
+  "ngfw": {
+    "enable_hierarchical_firewall_policy": true,
+    "enable_ngfw_standard_rules": true,
+    "enable_secure_tags": true,
+    "enable_ngfw_enterprise": false
+  },
+  "scc": {
+    "scc_tier": "PREMIUM",
+    "scc_scope": "ORGANIZATION",
+    "create_dedicated_secops_project": true,
+    "enable_audit_cmek": true,
+    "scc_alert_email_addresses": [
+      "gcp-secops-alerts@example.com"
+    ],
+    "runtime_detectors": [
+      "EVENT_THREAT_DETECTION",
+      "CONTAINER_THREAT_DETECTION",
+      "VIRTUAL_MACHINE_THREAT_DETECTION",
+      "CLOUD_RUN_THREAT_DETECTION"
+    ]
+  },
+  "data_science": {
+    "enable_data_science": true,
+    "ds_serving_track": "both",
+    "enable_ds_workbench": true,
+    "enable_colab_enterprise": false,
+    "enable_online_feature_store": false,
+    "xai_audit_retention_days": 2555,
+    "shap_additivity_tolerance": 0.00001,
+    "fairness_min_disparate_impact": 0.80
+  },
+  "enterprise_teams": {
+    "cloudops_admins_group": "grp-cloudops-admins@example.com",
+    "finops_admins_group": "grp-finops-admins@example.com",
+    "network_admins_group": "grp-network-admins@example.com",
+    "security_admins_group": "grp-security-admins@example.com",
+    "secops_analysts_group": "grp-secops-analysts@example.com",
+    "data_admins_group": "grp-data-admins@example.com",
+    "ai_admins_group": "grp-ai-admins@example.com",
+    "app_admins_group": "grp-app-admins@example.com"
+  },
+  "applications": {
+    "enable_apps": true,
+    "shared_artifact_registry": true,
+    "workloads": {
+      "app1": {
+        "display_name": "APP 1",
+        "enable_cloud_run": true,
+        "enable_gke": false,
+        "enable_cloud_sql": false,
+        "admin_group": "grp-app1-admins@example.com",
+        "developer_group": "grp-app1-devs@example.com"
+      }
+    }
+  },
+  "existing_landing_zone": {}
+}

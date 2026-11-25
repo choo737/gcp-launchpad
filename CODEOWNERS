@@ -1,0 +1,5 @@
+# Replace @choo737 with your private organization team slugs after cloning.
+* @choo737
+/.github/workflows/ @choo737
+/scripts/ @choo737
+/docs/ @choo737
